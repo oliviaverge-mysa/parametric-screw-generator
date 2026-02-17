@@ -1,23 +1,13 @@
-"""
-Head + drive + shaft assembly helpers.
+"""Compatibility wrapper. Prefer `screwgen.assembly.make_screw`."""
 
-No thread geometry included.
-"""
+from pathlib import Path
+import sys
 
-from __future__ import annotations
+_SRC = Path(__file__).resolve().parent / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
-import cadquery as cq
+from screwgen.assembly import make_screw
 
-from apply_drive import apply_drive_to_head
-from drive import DriveParams
-from head import HeadParams, make_head
-from shaft import ShaftParams, attach_shaft_to_head, make_shaft
-
-
-def make_screw(head_params: HeadParams, drive_params: DriveParams, shaft_params: ShaftParams) -> cq.Workplane:
-    """Build a screw as head -> drive-cut head -> unioned shaft."""
-    head = make_head(head_params)
-    head_with_drive = apply_drive_to_head(head, drive_params, head_params)
-    shaft = make_shaft(shaft_params)
-    return attach_shaft_to_head(head_with_drive, head_params, shaft)
+__all__ = ["make_screw"]
 
