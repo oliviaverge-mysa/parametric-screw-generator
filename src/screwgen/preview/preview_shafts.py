@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import cadquery as cq
 
-from ..export import export_step, export_stl
+from ..export import export_step, export_stl, out_path
 from ..heads import HeadParams, make_head
 from ..shaft import ShaftParams, attach_shaft_to_head, make_shaft
 
-OUTPUT_DIR = Path(__file__).resolve().parents[3] / "outputs"
 _D_MINOR_VALUES = [2.0, 3.0, 4.0]
 _L_VALUES = [10.0, 20.0, 35.0]
 _TIP_VALUES = [2.0, 4.0]
@@ -67,26 +67,45 @@ def build_screw_library_solids() -> list[cq.Workplane]:
     return out
 
 
-def export_screw_library(output_dir: Path = OUTPUT_DIR) -> tuple[Path, Path, int]:
+def export_screw_library(output_dir: Path | None = None) -> tuple[Path, Path, int]:
     solids = build_screw_library_solids()
     compound = cq.Compound.makeCompound([s.val() for s in solids])
     library_wp = cq.Workplane(obj=compound)
-    library_path = export_step(library_wp, "screw_library.step", output_dir)
-    section_path = export_step(_section_x_negative(library_wp), "screw_library_section.step", output_dir)
+    if output_dir is None:
+        library_path = export_step(library_wp, out_path("galleries", "step", "screw_library.step"))
+        section_path = export_step(
+            _section_x_negative(library_wp),
+            out_path("galleries", "sectioned/step", "screw_library_section.step"),
+        )
+    else:
+        library_path = export_step(library_wp, "screw_library.step", output_dir)
+        section_path = export_step(_section_x_negative(library_wp), "screw_library_section.step", output_dir)
     return library_path, section_path, len(solids)
 
 
 def main() -> None:
-    print(f"Output directory: {OUTPUT_DIR}\n")
+    parser = argparse.ArgumentParser(description="Generate shaft previews.")
+    parser.add_argument("--stl", action="store_true", help="Export STL files.")
+    parser.add_argument("--stl-tol", type=float, default=0.25, help="STL linear tolerance.")
+    parser.add_argument("--stl-ang", type=float, default=0.35, help="STL angular tolerance.")
+    args = parser.parse_args()
+
+    print("Output root: out/\n")
     variants = _shaft_variants()
     print("== Shaft variants ==")
     for sp in variants:
         shaft = make_shaft(sp)
         base = f"shaft_d{_fmt(sp.d_minor)}_L{_fmt(sp.L)}_tip{_fmt(sp.tip_len)}"
-        p_step = export_step(shaft, f"{base}.step", OUTPUT_DIR)
-        p_stl = export_stl(shaft, f"{base}.stl", OUTPUT_DIR)
+        p_step = export_step(shaft, out_path("shafts", "step", f"{base}.step"))
         print(f"  [{base}] STEP -> {p_step}")
-        print(f"  [{base}] STL  -> {p_stl}")
+        if args.stl:
+            p_stl = export_stl(
+                shaft,
+                out_path("shafts", "stl", f"{base}.stl"),
+                tolerance=args.stl_tol,
+                angular_tolerance=args.stl_ang,
+            )
+            print(f"  [{base}] STL  -> {p_stl}")
 
     print("\n== Head + shaft combinations (all heads) ==")
     for head_name in _HEAD_ORDER:
@@ -95,12 +114,18 @@ def main() -> None:
         for sp in variants:
             combo = attach_shaft_to_head(head, head_params, make_shaft(sp))
             combo_base = f"screw_{head_name}__dminor{_fmt(sp.d_minor)}_L{_fmt(sp.L)}_tip{_fmt(sp.tip_len)}"
-            c_step = export_step(combo, f"{combo_base}.step", OUTPUT_DIR)
-            c_stl = export_stl(combo, f"{combo_base}.stl", OUTPUT_DIR)
+            c_step = export_step(combo, out_path("screws", "step", f"{combo_base}.step"))
             print(f"  [{combo_base}] STEP -> {c_step}")
-            print(f"  [{combo_base}] STL  -> {c_stl}")
+            if args.stl:
+                c_stl = export_stl(
+                    combo,
+                    out_path("screws", "stl", f"{combo_base}.stl"),
+                    tolerance=args.stl_tol,
+                    angular_tolerance=args.stl_ang,
+                )
+                print(f"  [{combo_base}] STL  -> {c_stl}")
 
-    library_path, section_path, count = export_screw_library(OUTPUT_DIR)
+    library_path, section_path, count = export_screw_library()
     print(f"\n  screw_library.step -> {library_path}")
     print(f"  screw_library_section.step -> {section_path}")
     print(f"  solids in library: {count}")

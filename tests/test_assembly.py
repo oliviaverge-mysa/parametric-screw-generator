@@ -7,7 +7,9 @@ from screwgen.assembly import apply_drive_to_head
 from screwgen.drives import DriveParams
 from screwgen.heads import HeadParams, head_tool_z, make_head
 from screwgen.preview.preview_gallery import export_gallery
+from screwgen.spec import DriveSpec, HeadSpec, ScrewSpec, ShaftSpec, SmoothRegionSpec
 from screwgen.shaft import ShaftParams, attach_shaft_to_head, make_shaft, resolve_shaft_attach_z
+from screwgen.assembly import make_screw
 
 _HEADS: list[HeadParams] = [
     {"type": "flat", "d": 8.0, "h": 4.0},
@@ -63,4 +65,15 @@ def test_screw_gallery_exports(tmp_path):
     assert count == 24
     assert gallery.exists()
     assert section.exists()
+
+
+def test_make_screw_accepts_screwspec():
+    spec = ScrewSpec(
+        head=HeadSpec(type="pan", d=8.0, h=4.0),
+        drive=DriveSpec(type="torx", size=6),
+        shaft=ShaftSpec(d_minor=3.0, L=20.0, tip_len=3.0),
+        regions=[SmoothRegionSpec(length=20.0)],
+    )
+    screw = make_screw(spec)
+    assert screw.val().isValid()
 

@@ -16,6 +16,7 @@ dist/
 
 # CAD outputs
 outputs/
+out/
 
 # OS / editor
 .DS_Store

@@ -3,35 +3,51 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Union
+from typing import Literal, Union
 
 import cadquery as cq
 
-_DEFAULT_DIR = Path(__file__).resolve().parents[2] / "outputs"
+_OUT_ROOT = Path(__file__).resolve().parents[2] / "out"
+_Category = Literal["heads", "drives", "shafts", "screws", "galleries"]
+_Kind = Literal["step", "stl", "sectioned/step"]
+DEFAULT_STL_TOLERANCE = 0.25
+DEFAULT_STL_ANGULAR_TOLERANCE = 0.35
 
 
-def _ensure_dir(directory: Path) -> None:
+def ensure_dir(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True)
 
 
-def export_step(solid: cq.Workplane, filename: str, directory: Union[str, Path, None] = None) -> Path:
-    out_dir = Path(directory) if directory else _DEFAULT_DIR
-    _ensure_dir(out_dir)
-    path = out_dir / filename
+def out_path(category: _Category, kind: _Kind, filename: str) -> Path:
+    path = _OUT_ROOT / category / Path(kind) / filename
+    ensure_dir(path.parent)
+    return path.resolve()
+
+
+def export_step(
+    solid: cq.Workplane, filename_or_path: Union[str, Path], directory: Union[str, Path, None] = None
+) -> Path:
+    if directory is None:
+        path = Path(filename_or_path)
+    else:
+        path = Path(directory) / str(filename_or_path)
+    ensure_dir(path.parent)
     cq.exporters.export(solid, str(path), exportType="STEP")
     return path.resolve()
 
 
 def export_stl(
     solid: cq.Workplane,
-    filename: str,
+    filename_or_path: Union[str, Path],
     directory: Union[str, Path, None] = None,
-    tolerance: float = 0.05,
-    angular_tolerance: float = 0.2,
+    tolerance: float = DEFAULT_STL_TOLERANCE,
+    angular_tolerance: float = DEFAULT_STL_ANGULAR_TOLERANCE,
 ) -> Path:
-    out_dir = Path(directory) if directory else _DEFAULT_DIR
-    _ensure_dir(out_dir)
-    path = out_dir / filename
+    if directory is None:
+        path = Path(filename_or_path)
+    else:
+        path = Path(directory) / str(filename_or_path)
+    ensure_dir(path.parent)
     cq.exporters.export(
         solid,
         str(path),
@@ -43,6 +59,10 @@ def export_stl(
 
 
 def export_head(solid: cq.Workplane, head_type: str, directory: Union[str, Path, None] = None) -> tuple[Path, Path]:
+    if directory is None:
+        step_path = out_path("heads", "step", f"head_{head_type}.step")
+        stl_path = out_path("heads", "stl", f"head_{head_type}.stl")
+        return export_step(solid, step_path), export_stl(solid, stl_path)
     return (
         export_step(solid, f"head_{head_type}.step", directory),
         export_stl(solid, f"head_{head_type}.stl", directory),

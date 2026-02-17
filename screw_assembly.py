@@ -7,7 +7,7 @@ _SRC = Path(__file__).resolve().parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from screwgen.assembly import make_screw
+from screwgen.assembly import make_screw, make_screw_from_spec
 
-__all__ = ["make_screw"]
+__all__ = ["make_screw", "make_screw_from_spec"]
 

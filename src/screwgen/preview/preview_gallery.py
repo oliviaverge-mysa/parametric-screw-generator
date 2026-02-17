@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import cadquery as cq
 
 from ..assembly import apply_drive_to_head
 from ..drives import DriveParams
-from ..export import export_step, export_stl
+from ..export import export_step, export_stl, out_path
 from ..heads import HeadParams, head_tool_z, make_head
 from ..shaft import ShaftParams, attach_shaft_to_head, make_shaft
 
-OUTPUT_DIR = Path(__file__).resolve().parents[3] / "outputs"
 HEAD_TYPES = ["flat", "pan", "button", "hex"]
 DRIVE_TYPES = [("hex", 3), ("phillips", 4), ("torx", 6)]
 SHAFT_VARIANTS = {"A": ShaftParams(d_minor=3.0, L=20.0, tip_len=3.0), "B": ShaftParams(d_minor=4.0, L=35.0, tip_len=4.0)}
@@ -64,31 +64,49 @@ def build_gallery_solids() -> list[cq.Workplane]:
     return solids
 
 
-def export_gallery(output_dir: Path = OUTPUT_DIR) -> tuple[Path, Path, int]:
+def export_gallery(output_dir: Path | None = None) -> tuple[Path, Path, int]:
     solids = build_gallery_solids()
     comp = cq.Compound.makeCompound([s.val() for s in solids])
     wp = cq.Workplane(obj=comp)
-    gallery = export_step(wp, "screw_gallery.step", output_dir)
-    section = export_step(_section_x_negative(wp), "screw_gallery_section.step", output_dir)
+    if output_dir is None:
+        gallery = export_step(wp, out_path("galleries", "step", "screw_gallery.step"))
+        section = export_step(_section_x_negative(wp), out_path("galleries", "sectioned/step", "screw_gallery_section.step"))
+    else:
+        gallery = export_step(wp, "screw_gallery.step", output_dir)
+        section = export_step(_section_x_negative(wp), "screw_gallery_section.step", output_dir)
     return gallery, section, len(solids)
 
 
 def main() -> None:
-    print(f"Output directory: {OUTPUT_DIR}\n")
-    for head_type in HEAD_TYPES:
-        hp = _head_params(head_type)
-        head = make_head(hp)
-        for dtype, dsize in DRIVE_TYPES:
-            dp = _drive_params(hp, dtype, dsize)
-            driven = apply_drive_to_head(head, dp, hp)
-            for label, sp in SHAFT_VARIANTS.items():
-                screw = attach_shaft_to_head(driven, hp, make_shaft(sp))
-                base = f"screw_{head_type}__{dtype}__{label}"
-                p_step = export_step(screw, f"{base}.step", OUTPUT_DIR)
-                p_stl = export_stl(screw, f"{base}.stl", OUTPUT_DIR)
-                print(f"  [{base}] STEP -> {p_step}")
-                print(f"  [{base}] STL  -> {p_stl}")
-    gallery, section, count = export_gallery(OUTPUT_DIR)
+    parser = argparse.ArgumentParser(description="Generate representative screw gallery.")
+    parser.add_argument("--individual", action="store_true", help="Export individual screws.")
+    parser.add_argument("--stl", action="store_true", help="Export STL for individuals.")
+    parser.add_argument("--stl-tol", type=float, default=0.25, help="STL linear tolerance.")
+    parser.add_argument("--stl-ang", type=float, default=0.35, help="STL angular tolerance.")
+    args = parser.parse_args()
+
+    print("Output root: out/\n")
+    if args.individual:
+        for head_type in HEAD_TYPES:
+            hp = _head_params(head_type)
+            head = make_head(hp)
+            for dtype, dsize in DRIVE_TYPES:
+                dp = _drive_params(hp, dtype, dsize)
+                driven = apply_drive_to_head(head, dp, hp)
+                for label, sp in SHAFT_VARIANTS.items():
+                    screw = attach_shaft_to_head(driven, hp, make_shaft(sp))
+                    base = f"screw_{head_type}__{dtype}__{label}"
+                    p_step = export_step(screw, out_path("screws", "step", f"{base}.step"))
+                    print(f"  [{base}] STEP -> {p_step}")
+                    if args.stl:
+                        p_stl = export_stl(
+                            screw,
+                            out_path("screws", "stl", f"{base}.stl"),
+                            tolerance=args.stl_tol,
+                            angular_tolerance=args.stl_ang,
+                        )
+                        print(f"  [{base}] STL  -> {p_stl}")
+    gallery, section, count = export_gallery()
     print(f"\nGallery STEP -> {gallery}")
     print(f"Gallery section STEP -> {section}")
     print(f"Gallery screw count: {count}")
