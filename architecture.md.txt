@@ -1,0 +1,139 @@
+# Screw Generator Architecture (CadQuery / OCCT)
+
+## Goal
+Generate parametric screws as CAD solids with:
+- Head (4 types)
+- Drive recess (3 types, separate cut)
+- Shaft (core cylinder + pointed tip)
+Later: thread geometry + engineering drawing output.
+
+Outputs:
+- STEP (B-Rep solid)
+- STL (mesh)
+
+---
+
+## Global Coordinate Conventions
+All geometry is centered on the Z axis.
+
+### Head coordinates
+- Head occupies **Z ∈ [0, h_head]**
+- The plane **Z = 0** is the **shaft-attachment reference plane** for *most* heads
+- The “tool face” is whichever face receives the drive recess (defined per head type below)
+
+### Shaft coordinates (local)
+- Shaft is generated with its **attachment face at Z = 0**
+- Shaft length extends away from the attachment face to the pointed tip
+- Default shaft local orientation: either
+  - extends to **negative Z**: Z ∈ [-L, 0], tip at -L
+  - or extends to **positive Z**: Z ∈ [0, L], tip at +L  
+  (Pick one and be consistent; if needed, rotate during assembly.)
+
+### Assembly expectation (final screw)
+- Screw is one watertight solid:
+  1) build head
+  2) cut drive (head - driveCut)
+  3) union shaft (headWithDrive ∪ shaft)
+
+---
+
+## Allowed Head Types (ONLY these)
+Head is built first and independently.
+
+### 1) Flat (countersunk)
+- Geometry: conical frustum (inverted cone)
+- Large flat face (drive side) and cone side must be defined explicitly
+- Must support “seamless” shaft join:
+  - Shaft attaches on the **cone side**
+  - The shaft attachment Z should be chosen where cone radius equals shaft radius  
+    (so the transition is continuous, shaft top circle is “inside” the cone)
+
+### 2) Pan
+- Cylinder + spherical cap  
+  - cap radius: r = min(d*0.25, h*0.5)
+
+### 3) Button
+- Cylinder + more domed spherical cap  
+  - cap radius: r = min(d*0.4, h*0.8)
+
+### 4) Hex
+- Hexagonal prism
+- acrossFlats provided or defaulted
+
+No other head styles.
+
+---
+
+## Allowed Drive Types (ONLY these)
+Drive is implemented as a **separate cut solid**.
+It must be reusable with any head.
+
+### Drives:
+- Hex (size 3)
+- Phillips (size 4)
+- Torx (size 6)
+
+### Drive Cut Rules
+- Drive cut is placed at the head’s **tool face plane**
+- Drive cut direction goes into the head (toward interior)
+- Recess bottom shape:
+  - **conical depth within the drive footprint**
+  - Build cut as: (drive footprint prism) ∩ (cone/frustum)  
+    not (flat pocket + separate cone)
+
+No other drive types/sizes.
+
+---
+
+## Shaft (no threads yet)
+Shaft is the core under the future thread.
+
+### Geometry
+- Cylinder of diameter d_minor
+- Pointed tip at end (cone)
+
+Parameters:
+- d_minor (shaft diameter)
+- L (shaft length)
+- tip_len (cone height)
+
+No threads, no helix yet.
+
+---
+
+## Attachment Rules
+### General heads (pan/button/hex)
+- Shaft attaches at the head’s underside plane (typically Z=0)
+- Shaft extends away from the head to the tip
+
+### Flat head
+- Shaft attaches at the **cone side**
+- Attachment point should be computed so that:
+  - cone_radius(z_attach) == shaft_radius  
+  (smooth/continuous outer surface)
+- Use small overlap for robust union
+
+---
+
+## Smoothing
+After union, apply a small junction fillet/chamfer to head↔shaft seam:
+- very small radius (e.g., 0.1–0.25 mm) to avoid OCCT failures
+- must NOT affect drive recess edges or tip edges
+
+Fallback: if fillet fails, use chamfer.
+
+---
+
+## Preview / Gallery Policy
+Maintain preview scripts that export:
+- Individual part examples (STEP + STL)
+- A single combined gallery STEP for CAD review:
+  - head × drive × shaft (representative sizes)
+- A sectioned gallery STEP to view recess + junctions
+
+---
+
+## Non-goals (for now)
+- No threads yet
+- No standards-perfect driver dimensions yet (visual + scalable first)
+- No confidential references in documentation
