@@ -7,11 +7,16 @@ const deleteChatBtn = document.getElementById("delete-chat-btn");
 const toggleSidebarBtn = document.getElementById("toggle-sidebar-btn");
 const appEl = document.querySelector(".app");
 const contextMenuEl = document.getElementById("chat-context-menu");
+const ctxRenameChatBtn = document.getElementById("ctx-rename-chat-btn");
 const ctxDeleteChatBtn = document.getElementById("ctx-delete-chat-btn");
+const composerSendBtn = formEl.querySelector("button[type='submit']");
 
 let currentChatId = null;
 let pendingQuestion = null;
 let contextChatId = null;
+let contextChatTitle = "";
+let editingMessageIdx = null;
+let editingDraft = "";
 
 function renderChatList(chats) {
   chatListEl.innerHTML = "";
@@ -19,10 +24,12 @@ function renderChatList(chats) {
     const div = document.createElement("div");
     div.className = "chat-item" + (chat.id === currentChatId ? " active" : "");
     div.textContent = chat.title;
+    div.dataset.chatTitle = chat.title;
     div.onclick = () => loadChat(chat.id);
     div.oncontextmenu = async (e) => {
       e.preventDefault();
       contextChatId = chat.id;
+      contextChatTitle = chat.title;
       contextMenuEl.hidden = false;
       contextMenuEl.style.left = `${e.clientX}px`;
       contextMenuEl.style.top = `${e.clientY}px`;
@@ -35,9 +42,45 @@ function bubble(message, idx, latestUserIdx) {
   const node = document.createElement("div");
   node.className = `bubble ${message.role}`;
 
-  const content = document.createElement("div");
-  content.textContent = message.content;
-  node.appendChild(content);
+  if (message.role === "user" && idx === editingMessageIdx) {
+    node.classList.add("editing");
+    const input = document.createElement("textarea");
+    input.className = "edit-input";
+    input.value = editingDraft || message.content;
+    input.rows = 2;
+    input.oninput = () => {
+      editingDraft = input.value;
+    };
+    input.onkeydown = async (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        await saveEdit(idx);
+      }
+    };
+    node.appendChild(input);
+
+    const actions = document.createElement("div");
+    actions.className = "edit-actions";
+    const saveBtn = document.createElement("button");
+    saveBtn.className = "edit-btn";
+    saveBtn.textContent = "Save";
+    saveBtn.onclick = async () => saveEdit(idx);
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "edit-btn";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.onclick = () => {
+      editingMessageIdx = null;
+      editingDraft = "";
+      loadChat(currentChatId);
+    };
+    actions.appendChild(saveBtn);
+    actions.appendChild(cancelBtn);
+    node.appendChild(actions);
+  } else {
+    const content = document.createElement("div");
+    content.textContent = message.content;
+    node.appendChild(content);
+  }
 
   if (message.kind === "result" && message.stl_url) {
     node.appendChild(resultCard(message));
@@ -47,19 +90,37 @@ function bubble(message, idx, latestUserIdx) {
     const editBtn = document.createElement("button");
     editBtn.className = "edit-btn";
     editBtn.textContent = "Edit";
-    editBtn.onclick = async () => {
-      const updated = prompt("Edit message:", message.content);
-      if (updated === null) return;
-      await fetch(`/api/chats/${currentChatId}/messages/${idx}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: updated }),
-      });
-      await loadChat(currentChatId);
+    editBtn.onclick = () => {
+      editingMessageIdx = idx;
+      editingDraft = message.content;
+      loadChat(currentChatId);
     };
     node.appendChild(editBtn);
   }
   return node;
+}
+
+async function saveEdit(idx) {
+  const updated = editingDraft.trim();
+  if (!updated) {
+    alert("Edited message cannot be empty.");
+    return;
+  }
+  setWorking(true);
+  const res = await fetch(`/api/chats/${currentChatId}/messages/${idx}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: updated }),
+  });
+  setWorking(false);
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({ detail: "Could not edit message." }));
+    alert(errorBody.detail || "Could not edit message.");
+    return;
+  }
+  editingMessageIdx = null;
+  editingDraft = "";
+  await loadChat(currentChatId);
 }
 
 function resultCard(message) {
@@ -78,9 +139,11 @@ function resultCard(message) {
   const actions = document.createElement("div");
   actions.className = "result-actions";
 
-  const status = document.createElement("div");
-  status.className = "preview-status";
-  status.textContent = "Generating preview...";
+  const drawingBtn = document.createElement("a");
+  drawingBtn.className = "download-btn disabled";
+  drawingBtn.textContent = "Download Drawing";
+  drawingBtn.href = message.drawing_url || "#";
+  drawingBtn.download = "";
 
   const stepBtn = document.createElement("a");
   stepBtn.className = "download-btn disabled";
@@ -94,28 +157,44 @@ function resultCard(message) {
   stlBtn.href = message.stl_url || "#";
   stlBtn.download = "";
 
-  actions.appendChild(status);
+  const bundleBtn = document.createElement("a");
+  bundleBtn.className = "download-btn disabled";
+  bundleBtn.textContent = "Download ZIP (All)";
+  bundleBtn.href = message.bundle_url || "#";
+  bundleBtn.download = "";
+
+  actions.appendChild(drawingBtn);
   actions.appendChild(stepBtn);
   actions.appendChild(stlBtn);
+  actions.appendChild(bundleBtn);
   card.appendChild(actions);
 
   if (!message.step_url || !message.stl_url) {
-    status.textContent = "No downloadable model in this response.";
+    drawingBtn.textContent = "No model files";
     return card;
+  }
+  if (message.drawing_url) {
+    drawingBtn.classList.remove("disabled");
+  } else {
+    drawingBtn.textContent = "Drawing unavailable";
   }
 
   initPreviewImage(preview, message.preview_url, {
     onReady: () => {
-      status.textContent = "Preview ready.";
       stepBtn.classList.remove("disabled");
       stlBtn.classList.remove("disabled");
+      if (message.bundle_url) bundleBtn.classList.remove("disabled");
     },
     onError: () => {
-      status.textContent = "Preview unavailable. Downloads ready.";
       stepBtn.classList.remove("disabled");
       stlBtn.classList.remove("disabled");
+      if (message.bundle_url) bundleBtn.classList.remove("disabled");
     },
   });
+
+  if (!message.bundle_url) {
+    bundleBtn.textContent = "ZIP unavailable";
+  }
 
   return card;
 }
@@ -145,6 +224,11 @@ function renderMessages(chat) {
     messagesEl.appendChild(bubble(msg, idx, latestUserIdx));
   });
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function setWorking(isWorking) {
+  composerSendBtn.disabled = isWorking;
+  composerSendBtn.textContent = isWorking ? "Working..." : "Send";
 }
 
 async function loadChats() {
@@ -192,11 +276,13 @@ formEl.addEventListener("submit", async (e) => {
   const content = raw.trim();
   if (!content && !pendingQuestion) return;
   inputEl.value = "";
+  setWorking(true);
   const res = await fetch(`/api/chats/${currentChatId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content: pendingQuestion ? raw : content }),
   });
+  setWorking(false);
   if (!res.ok) {
     const errorBody = await res.json().catch(() => ({ detail: "Request failed." }));
     alert(errorBody.detail || "Could not process request.");
@@ -233,6 +319,30 @@ ctxDeleteChatBtn.addEventListener("click", async () => {
   if (currentChatId === contextChatId) currentChatId = null;
   contextChatId = null;
   contextMenuEl.hidden = true;
+  await loadChats();
+});
+
+ctxRenameChatBtn.addEventListener("click", async () => {
+  if (!contextChatId) return;
+  const next = prompt("Rename chat:", contextChatTitle || "Chat");
+  if (next === null) return;
+  const title = next.trim();
+  if (!title) {
+    alert("Title cannot be empty.");
+    return;
+  }
+  const res = await fetch(`/api/chats/${contextChatId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({ detail: "Could not rename chat." }));
+    alert(errorBody.detail || "Could not rename chat.");
+    return;
+  }
+  contextMenuEl.hidden = true;
+  contextChatId = null;
   await loadChats();
 });
 

@@ -91,6 +91,9 @@ body {
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(50, 30, 90, 0.15);
   padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 #new-chat-btn:hover {
@@ -142,13 +145,19 @@ body {
 }
 
 .toolbar-btn {
-  border: 1px solid #c9b4ec;
-  background: #f4efff;
-  color: #4b3277;
+  border: 1px solid #000000;
+  background: #000000;
+  color: #ffffff;
   border-radius: 8px;
   padding: 6px 10px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.toolbar-btn:hover {
+  background: #ff66b6;
+  border-color: #ff66b6;
+  color: #ffffff;
 }
 
 .messages {
@@ -176,6 +185,12 @@ body {
   border-color: #cfbff3;
 }
 
+.bubble.user.editing {
+  width: 78%;
+  max-width: 78%;
+  min-width: 320px;
+}
+
 .bubble.bot {
   align-self: flex-start;
   background: #ffffff;
@@ -184,24 +199,35 @@ body {
 
 .bubble .edit-btn {
   margin-top: 8px;
-  border: 1px solid #d1dae8;
-  background: #ffffff;
-  color: #4b3277;
+  border: 1px solid #000000;
+  background: #000000;
+  color: #ffffff;
   border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
   padding: 3px 8px;
 }
 
-.bubble.bot::after {
-  content: "";
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  right: 8px;
-  top: 8px;
-  background: #ff66b655;
+.bubble .edit-btn:hover {
+  background: #ff66b6;
+  border-color: #ff66b6;
+}
+
+.edit-input {
+  width: 100%;
+  border: 1px solid #bfbfbf;
+  border-radius: 8px;
+  padding: 8px;
+  font-family: inherit;
+  font-size: 15px;
+  background: #fff;
+  color: #111;
+}
+
+.edit-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
 }
 
 .composer {
@@ -222,13 +248,18 @@ body {
 }
 
 .composer button {
-  border: 1px solid #c9b4ec;
-  background: #f4efff;
-  color: #4b3277;
+  border: 1px solid #000000;
+  background: #000000;
+  color: #ffffff;
   font-weight: 600;
   border-radius: 8px;
   padding: 10px 14px;
   cursor: pointer;
+}
+
+.composer button:hover {
+  background: #ff66b6;
+  border-color: #ff66b6;
 }
 
 .preview-card {
@@ -284,6 +315,12 @@ body {
   border-radius: 8px;
   padding: 8px;
   font-size: 12px;
+}
+
+.download-btn:hover {
+  background: #ff66b6;
+  border-color: #ff66b6;
+  color: #fff;
 }
 
 .download-btn.disabled {

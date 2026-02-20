@@ -120,7 +120,7 @@ def _find_overall_length(text: str) -> float | None:
     if value is not None:
         return value
     m2 = re.search(
-        r"(-?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s*(?:mm|in|inch|inches|\"|')?\s*(?<!thread\s)(?<!tip\s)length\b",
+        r"(-?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s*(?:mm|in|inch|inches|\"|')?\s*(?<!thread\s)(?<!tip\s)length\b(?!\s*\d)",
         text,
     )
     if m2:
@@ -439,7 +439,12 @@ def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpe
         drive=(
             None
             if parsed.drive_type is None
-            else DriveSpec(type=parsed.drive_type, size=parsed.drive_size or 6)  # type: ignore[arg-type]
+            else DriveSpec(
+                type=parsed.drive_type,  # type: ignore[arg-type]
+                size=parsed.drive_size or 6,  # type: ignore[arg-type]
+                fit="scale_to_head",
+                clearance=0.02,
+            )
         ),
         shaft=ShaftSpec(
             d_minor=float(parsed.root_d),

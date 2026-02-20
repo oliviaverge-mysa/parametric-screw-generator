@@ -164,7 +164,7 @@ def make_screw_from_spec(spec: ScrewSpec, include_thread_markers: bool = True) -
                 thread_height=tr.thread_height,
                 handedness=tr.handedness,
                 starts=tr.starts,
-                mode="cut",
+                mode="add",
             ),
         )
         shaft = shaft_up.rotate((0, 0, 0), (1, 0, 0), 180)

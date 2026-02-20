@@ -23,7 +23,7 @@ DRIVE_DIMS: dict[tuple[DriveType, DriveSize], dict] = {
 CONFIG: dict[str, float] = {
     "hex_opening_fraction": 0.35,
     "phillips_opening_fraction": 0.45,
-    "torx_opening_fraction": 0.45,
+    "torx_opening_fraction": 0.38,
     "min_wall_abs": 0.6,
     "min_wall_fraction": 0.12,
     "cone_cover_margin": 0.2,

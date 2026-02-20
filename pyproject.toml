@@ -13,6 +13,7 @@ dependencies = [
   "pytest>=9.0",
   "fastapi",
   "uvicorn",
+  "reportlab",
 ]
 
 [tool.setuptools.packages.find]
