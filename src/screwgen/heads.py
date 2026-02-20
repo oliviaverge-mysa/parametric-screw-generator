@@ -132,7 +132,8 @@ def make_head(params: HeadParams) -> cq.Workplane:
     if head_type == "hex":
         af_raw = params.get("acrossFlats")
         if af_raw is None:
-            raise ValueError("acrossFlats must be provided for hex heads.")
+            # Derive across-flats from nominal head diameter (corner-to-corner).
+            af_raw = d * math.cos(math.radians(30))
         af = float(af_raw)
         return _make_hex(d, h, af)
     raise ValueError(f"Unhandled head type: {head_type!r}")

@@ -15,12 +15,21 @@ body {
   min-height: 100vh;
 }
 
+.app.sidebar-collapsed {
+  grid-template-columns: 0 1fr;
+}
+
 .sidebar {
   border-right: 1px solid #d8deea;
   background: #ffffff;
   display: flex;
   flex-direction: column;
   position: relative;
+}
+
+.app.sidebar-collapsed .sidebar {
+  overflow: hidden;
+  border-right: 0;
 }
 
 .sidebar::after {
@@ -42,6 +51,11 @@ body {
   font-size: 20px;
 }
 
+.sidebar-actions {
+  display: flex;
+  gap: 8px;
+}
+
 #new-chat-btn {
   width: 100%;
   border: 1px solid #bfd0e8;
@@ -53,6 +67,30 @@ body {
   border-radius: 8px;
   padding: 8px;
   cursor: pointer;
+}
+
+.danger-btn {
+  border: 1px solid #e0bfd2;
+  background: #fff2f8;
+  color: #7a2f5a;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.danger-btn:hover {
+  background: #ffe8f4;
+}
+
+.chat-context-menu {
+  position: fixed;
+  z-index: 999;
+  background: #ffffff;
+  border: 1px solid #e0bfd2;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(50, 30, 90, 0.15);
+  padding: 6px;
 }
 
 #new-chat-btn:hover {
@@ -76,20 +114,41 @@ body {
   cursor: pointer;
 }
 
+.chat-item:hover {
+  background: #f4efff;
+}
+
 .chat-item.active {
-  border-color: #9cb7db;
-  background: #eaf2ff;
+  border-color: #a891d9;
+  background: #f1ebff;
 }
 
 .main {
   display: flex;
   min-height: 100vh;
+  background: #fbf8ff;
 }
 
 .chat-panel {
   display: flex;
   flex-direction: column;
   width: 100%;
+}
+
+.chat-toolbar {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e5dcf5;
+  background: #ffffff;
+}
+
+.toolbar-btn {
+  border: 1px solid #c9b4ec;
+  background: #f4efff;
+  color: #4b3277;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .messages {
@@ -113,8 +172,8 @@ body {
 
 .bubble.user {
   align-self: flex-end;
-  background: #e9f3ff;
-  border-color: #bed5f4;
+  background: #eee6ff;
+  border-color: #cfbff3;
 }
 
 .bubble.bot {
@@ -127,7 +186,7 @@ body {
   margin-top: 8px;
   border: 1px solid #d1dae8;
   background: #ffffff;
-  color: #2b4258;
+  color: #4b3277;
   border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
@@ -149,23 +208,23 @@ body {
   display: flex;
   gap: 10px;
   padding: 12px;
-  border-top: 1px solid #d8deea;
+  border-top: 1px solid #e5dcf5;
   background: #ffffff;
 }
 
 .composer input {
   flex: 1;
-  border: 1px solid #bfd0e8;
+  border: 1px solid #c9b4ec;
   background: #ffffff;
-  color: #1b2a38;
+  color: #2d2248;
   border-radius: 8px;
   padding: 10px;
 }
 
 .composer button {
-  border: 1px solid #bfd0e8;
-  background: #edf4ff;
-  color: #20456f;
+  border: 1px solid #c9b4ec;
+  background: #f4efff;
+  color: #4b3277;
   font-weight: 600;
   border-radius: 8px;
   padding: 10px 14px;
@@ -176,7 +235,7 @@ body {
   display: flex;
   flex-direction: column;
   margin-top: 10px;
-  border: 1px solid #e1e6f0;
+  border: 1px solid #e5dcf5;
   background: #fcfdff;
   border-radius: 10px;
   overflow: hidden;
@@ -186,21 +245,31 @@ body {
   padding: 8px 10px;
   font-size: 12px;
   font-weight: 600;
-  color: #35506a;
-  border-bottom: 1px solid #e1e6f0;
-  background: #f4f8ff;
+  color: #4b3277;
+  border-bottom: 1px solid #e5dcf5;
+  background: #f7f2ff;
 }
 
 .preview-canvas {
   min-height: 220px;
-  background: radial-gradient(circle at top right, #ffe8f6 0%, #ffffff 38%, #f3f7ff 100%);
+  background: radial-gradient(circle at top right, #ffd8ef 0%, #ffffff 42%, #f2ebff 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.preview-canvas img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .result-actions {
   display: flex;
   gap: 10px;
   padding: 8px;
-  border-top: 1px solid #e1e6f0;
+  border-top: 1px solid #e5dcf5;
   background: #ffffff;
 }
 
@@ -209,9 +278,9 @@ body {
   flex: 1;
   text-align: center;
   text-decoration: none;
-  color: #20456f;
-  border: 1px solid #bfd0e8;
-  background: #edf4ff;
+  color: #4b3277;
+  border: 1px solid #c9b4ec;
+  background: #f4efff;
   border-radius: 8px;
   padding: 8px;
   font-size: 12px;
@@ -224,6 +293,6 @@ body {
 
 .preview-status {
   background: #fff;
-  color: #5f7389;
+  color: #5a4d77;
 }
 

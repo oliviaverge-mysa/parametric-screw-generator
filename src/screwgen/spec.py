@@ -52,6 +52,7 @@ class ThreadRegionSpec(RegionSpec):
     handedness: Handedness = "RH"
     start_offset: float = 0.0
     major_d: float | None = None
+    thread_height: float | None = None
 
 
 Region = Union[SmoothRegionSpec, ThreadRegionSpec]
@@ -116,6 +117,10 @@ def validate_screw_spec(spec: ScrewSpec) -> None:
                 raise ValueError(
                     f"regions[{i}].major_d must be > shaft.d_minor when provided, "
                     f"got major_d={region.major_d!r}, d_minor={spec.shaft.d_minor!r}"
+                )
+            if region.thread_height is not None and region.thread_height <= 0:
+                raise ValueError(
+                    f"regions[{i}].thread_height must be > 0 when provided, got {region.thread_height!r}"
                 )
     if total > spec.shaft.L + 1e-9:
         raise ValueError(

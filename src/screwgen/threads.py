@@ -163,7 +163,12 @@ def apply_external_thread(core_shaft: cq.Workplane, shaft_spec: ShaftSpec, p: Th
         .extrude(p.length)
     )
     groove = _build_cut_groove_solid(shaft_spec, p, thread_height)
-    threaded_segment = major_segment.cut(groove)
+    try:
+        threaded_segment = major_segment.cut(groove)
+    except Exception:
+        # Boolean can fail for some extreme inferred thread combinations.
+        ridge = _build_add_thread_solid(shaft_spec, p, thread_height)
+        return core_shaft.union(ridge, clean=True).combine()
     result = core_shaft.union(threaded_segment, clean=True).combine()
     if not result.val().isValid():
         # Fallback to add-mode ridge when groove cut is numerically unstable.

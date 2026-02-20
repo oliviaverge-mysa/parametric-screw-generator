@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,7 +14,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .search_parser import screw_spec_from_query
+from .search_parser import parse_query, screw_spec_from_query
+from .spec import ThreadRegionSpec
 
 
 class _NeedInput(Exception):
@@ -44,7 +46,6 @@ class EditMessageIn(BaseModel):
 class ChatSummary(BaseModel):
     id: int
     title: str
-    message_count: int
 
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -62,7 +63,7 @@ _chats: dict[int, ChatState] = {}
 
 def _new_chat(title: str | None = None) -> ChatState:
     cid = next(_chat_counter)
-    chat = ChatState(id=cid, title=title or f"Chat {cid}")
+    chat = ChatState(id=cid, title=title or "New Screw")
     _chats[cid] = chat
     return chat
 
@@ -107,6 +108,7 @@ def _attempt_build(chat: ChatState) -> dict[str, Any]:
     try:
         from .assembly import make_screw_from_spec
         from .export import export_step, export_stl
+        from cadquery import exporters
     except ModuleNotFoundError as exc:
         chat.pending_question = None
         return {
@@ -121,14 +123,26 @@ def _attempt_build(chat: ChatState) -> dict[str, Any]:
 
     chat.pending_question = None
     stamp = int(time.time() * 1000)
-    stem = f"chat{chat.id}_{stamp}"
+    head_tag = f"{spec.head.type}_hd{spec.head.d:.2f}_L{spec.shaft.L:.2f}"
+    if spec.drive is not None:
+        head_tag += f"_{spec.drive.type}"
+    if any(isinstance(r, ThreadRegionSpec) for r in spec.regions):
+        head_tag += "_threaded"
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", head_tag).strip("_").lower()
+    stem = f"{slug}_{stamp}"
     screw = make_screw_from_spec(spec, include_thread_markers=False)
     step_path = export_step(screw, _DOWNLOAD_DIR / f"{stem}.step")
     stl_path = export_stl(screw, _DOWNLOAD_DIR / f"{stem}.stl")
+    preview_path = _DOWNLOAD_DIR / f"{stem}.svg"
+    try:
+        exporters.export(screw, str(preview_path), exportType="SVG")
+        preview_url = f"/downloads/{preview_path.name}"
+    except Exception:
+        preview_url = ""
 
     step_url = f"/downloads/{step_path.name}"
     stl_url = f"/downloads/{stl_path.name}"
-    chat.latest_files = {"step_url": step_url, "stl_url": stl_url}
+    chat.latest_files = {"step_url": step_url, "stl_url": stl_url, "preview_url": preview_url}
     msg = _bot(
         chat,
         "Screw generated. Use the buttons to download STEP/STL or inspect STL preview.",
@@ -149,9 +163,23 @@ def index() -> HTMLResponse:
 @app.get("/api/chats", response_model=list[ChatSummary])
 def list_chats() -> list[ChatSummary]:
     return [
-        ChatSummary(id=c.id, title=c.title, message_count=len(c.messages))
+        ChatSummary(id=c.id, title=c.title)
         for c in sorted(_chats.values(), key=lambda x: x.id)
     ]
+
+
+@app.delete("/api/chats")
+def clear_chats() -> dict[str, Any]:
+    _chats.clear()
+    return {"ok": True}
+
+
+@app.delete("/api/chats/{chat_id}")
+def delete_chat(chat_id: int) -> dict[str, Any]:
+    if chat_id not in _chats:
+        raise HTTPException(status_code=404, detail="Chat not found.")
+    del _chats[chat_id]
+    return {"ok": True}
 
 
 @app.post("/api/chats")
@@ -182,8 +210,30 @@ def edit_message(chat_id: int, msg_idx: int, body: EditMessageIn) -> dict[str, A
         raise HTTPException(status_code=404, detail="Chat not found.")
     if msg_idx < 0 or msg_idx >= len(chat.messages):
         raise HTTPException(status_code=404, detail="Message not found.")
-    chat.messages[msg_idx]["content"] = body.content
-    return {"ok": True, "message": chat.messages[msg_idx]}
+    message = chat.messages[msg_idx]
+    if message.get("role") != "user":
+        raise HTTPException(status_code=400, detail="Only user messages can be edited.")
+    latest_user_idx = max((i for i, m in enumerate(chat.messages) if m.get("role") == "user"), default=-1)
+    if msg_idx != latest_user_idx:
+        raise HTTPException(status_code=400, detail="Only the latest user message can be edited.")
+
+    updated = body.content.strip()
+    if not updated:
+        raise HTTPException(status_code=400, detail="Edited message cannot be empty.")
+    message["content"] = updated
+
+    # Recompute the latest bot response from this edited user message.
+    chat.messages = chat.messages[: msg_idx + 1]
+    chat.query = updated
+    chat.answers = {}
+    chat.pending_question = None
+    result = _attempt_build(chat)
+    return {
+        "ok": True,
+        "result": result,
+        "messages": chat.messages,
+        "pending_question": chat.pending_question,
+    }
 
 
 @app.post("/api/chats/{chat_id}/messages")
@@ -192,14 +242,21 @@ def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat not found.")
 
-    content = body.content.strip()
-    if not content:
+    raw = body.content
+    content = raw.strip()
+    if chat.pending_question is None and not content:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
-    _user(chat, content)
+    # Allow empty reply when prompt says "Press Enter to continue."
+    if content:
+        _user(chat, content)
 
     if chat.pending_question is None:
         chat.query = content
         chat.answers = {}
+        parsed = parse_query(content)
+        if parsed.head_type is not None:
+            threadish = ("thread" in content.lower()) or ("tpi" in content.lower()) or (parsed.pitch is not None)
+            chat.title = f"{parsed.head_type.title()} {'Threaded ' if threadish else ''}Screw"
     else:
         chat.answers[chat.pending_question] = content
 

@@ -161,6 +161,7 @@ def make_screw_from_spec(spec: ScrewSpec, include_thread_markers: bool = True) -
                 start_from_head=thread_start,
                 included_angle_deg=60.0,
                 major_d=tr.major_d,
+                thread_height=tr.thread_height,
                 handedness=tr.handedness,
                 starts=tr.starts,
                 mode="cut",
