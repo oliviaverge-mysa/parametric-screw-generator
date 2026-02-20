@@ -19,6 +19,8 @@ class HeadParams(TypedDict, total=False):
     d: float
     h: float
     acrossFlats: Optional[float]
+    flatTopD: float
+    domeRadius: float
 
 
 _VALID_TYPES: set[HeadType] = {"flat", "pan", "button", "hex"}
@@ -39,14 +41,19 @@ def _validate(params: HeadParams) -> None:
     af = params.get("acrossFlats")
     if af is not None and af <= 0:
         raise ValueError(f"acrossFlats must be > 0 when provided, got {af!r}")
+    flat_top_d = params.get("flatTopD")
+    if flat_top_d is not None and flat_top_d <= 0:
+        raise ValueError(f"flatTopD must be > 0 when provided, got {flat_top_d!r}")
+    dome_radius = params.get("domeRadius")
+    if dome_radius is not None and dome_radius <= 0:
+        raise ValueError(f"domeRadius must be > 0 when provided, got {dome_radius!r}")
 
 
 def _flat_top_d(d: float) -> float:
     return max(0.05 * d, 0.2)
 
 
-def _make_flat(d: float, h: float) -> cq.Workplane:
-    top_d = _flat_top_d(d)
+def _make_flat(d: float, h: float, top_d: float) -> cq.Workplane:
     if top_d >= d:
         raise ValueError(
             f"Computed top_d ({top_d}) must be < d ({d}); increase d or check parameters."
@@ -64,9 +71,17 @@ def _make_flat(d: float, h: float) -> cq.Workplane:
     )
 
 
-def _make_domed(d: float, h: float, r_factor_d: float, r_factor_h: float) -> cq.Workplane:
+def _make_domed(
+    d: float,
+    h: float,
+    r_factor_d: float,
+    r_factor_h: float,
+    dome_radius: float | None = None,
+) -> cq.Workplane:
     r_head = d / 2.0
-    r_dome = min(d * r_factor_d, h * r_factor_h)
+    r_dome = dome_radius if dome_radius is not None else min(d * r_factor_d, h * r_factor_h)
+    if r_dome >= h:
+        raise ValueError(f"domeRadius must be < h, got domeRadius={r_dome!r}, h={h!r}")
     h_cyl = h - r_dome
     u = (r_head**2 + r_dome**2) / (2.0 * r_dome)
     R = u
@@ -84,12 +99,12 @@ def _make_domed(d: float, h: float, r_factor_d: float, r_factor_h: float) -> cq.
     return profile.revolve(360, (0, 0, 0), (0, 1, 0))
 
 
-def _make_pan(d: float, h: float) -> cq.Workplane:
-    return _make_domed(d, h, 0.25, 0.5)
+def _make_pan(d: float, h: float, dome_radius: float | None = None) -> cq.Workplane:
+    return _make_domed(d, h, 0.25, 0.5, dome_radius=dome_radius)
 
 
-def _make_button(d: float, h: float) -> cq.Workplane:
-    return _make_domed(d, h, 0.4, 0.8)
+def _make_button(d: float, h: float, dome_radius: float | None = None) -> cq.Workplane:
+    return _make_domed(d, h, 0.4, 0.8, dome_radius=dome_radius)
 
 
 def _make_hex(d: float, h: float, across_flats: float) -> cq.Workplane:
@@ -106,14 +121,19 @@ def make_head(params: HeadParams) -> cq.Workplane:
     head_type: HeadType = params["type"]
     d = float(params["d"])
     h = float(params["h"])
+    flat_top_d = params.get("flatTopD")
+    dome_radius = params.get("domeRadius")
     if head_type == "flat":
-        return _make_flat(d, h)
+        return _make_flat(d, h, float(flat_top_d) if flat_top_d is not None else _flat_top_d(d))
     if head_type == "pan":
-        return _make_pan(d, h)
+        return _make_pan(d, h, float(dome_radius) if dome_radius is not None else None)
     if head_type == "button":
-        return _make_button(d, h)
+        return _make_button(d, h, float(dome_radius) if dome_radius is not None else None)
     if head_type == "hex":
-        af = float(params.get("acrossFlats") or d)
+        af_raw = params.get("acrossFlats")
+        if af_raw is None:
+            raise ValueError("acrossFlats must be provided for hex heads.")
+        af = float(af_raw)
         return _make_hex(d, h, af)
     raise ValueError(f"Unhandled head type: {head_type!r}")
 

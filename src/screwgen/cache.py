@@ -19,15 +19,21 @@ def _head_key(p: HeadParams) -> tuple:
         float(p["d"]),
         float(p["h"]),
         None if p.get("acrossFlats") is None else float(p["acrossFlats"]),
+        None if p.get("flatTopD") is None else float(p["flatTopD"]),
+        None if p.get("domeRadius") is None else float(p["domeRadius"]),
     )
 
 
 @lru_cache(maxsize=128)
 def _cached_head_shape(key: tuple) -> cq.Shape:
-    htype, d, h, af = key
+    htype, d, h, af, flat_top_d, dome_radius = key
     params: HeadParams = {"type": htype, "d": d, "h": h}  # type: ignore[typeddict-item]
     if af is not None:
         params["acrossFlats"] = af
+    if flat_top_d is not None:
+        params["flatTopD"] = flat_top_d
+    if dome_radius is not None:
+        params["domeRadius"] = dome_radius
     return make_head(params).val()
 
 

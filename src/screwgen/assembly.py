@@ -21,6 +21,7 @@ from .spec import (
     validate_screw_spec,
 )
 from .threads import ThreadParams, apply_external_thread
+from .search_parser import PromptFn, screw_spec_from_query
 
 _THREAD_SLEEVE_RADIAL_THICKNESS = 0.2
 
@@ -198,4 +199,10 @@ def make_screw(
     head_with_drive = apply_drive_to_head(head, drive_params, spec_or_head_params)
     shaft = cached_make_shaft(shaft_params)
     return attach_shaft_to_head(head_with_drive, spec_or_head_params, shaft)
+
+
+def make_screw_from_query(query: str, prompt: PromptFn | None = None) -> cq.Workplane:
+    """Build screw from plain-text query, prompting for missing dimensions when needed."""
+    spec = screw_spec_from_query(query, prompt=prompt)
+    return make_screw_from_spec(spec, include_thread_markers=True)
 

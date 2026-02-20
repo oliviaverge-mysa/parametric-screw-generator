@@ -23,6 +23,7 @@ class ThreadParams:
     starts: int = 1
     mode: Literal["add", "cut"] = "cut"
     clearance: float = 0.0
+    require_explicit_profile: bool = False
 
 
 def _default_thread_height(pitch: float, d_minor: float) -> float:
@@ -50,6 +51,10 @@ def _validate(shaft_spec: ShaftSpec, p: ThreadParams) -> None:
         )
     if p.thread_height is not None and p.thread_height <= 0:
         raise ValueError(f"thread_height must be > 0 when provided, got {p.thread_height!r}")
+    if p.require_explicit_profile and p.thread_height is None and p.major_d is None:
+        raise ValueError(
+            "When require_explicit_profile=True, provide thread_height or major_d."
+        )
 
     max_threadable = shaft_spec.L - shaft_spec.tip_len
     if p.start_from_head + p.length > max_threadable + 1e-9:

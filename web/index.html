@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ScrewGen Chat</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <h1>ScrewGen</h1>
+        <button id="new-chat-btn">+ New Chat</button>
+      </div>
+      <div id="chat-list" class="chat-list"></div>
+    </aside>
+
+    <main class="main">
+      <section class="chat-panel">
+        <div id="messages" class="messages"></div>
+        <form id="composer" class="composer">
+          <input id="message-input" type="text" placeholder="Describe the screw you want..." autocomplete="off" />
+          <button type="submit">Send</button>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/assets/app.js"></script>
+</body>
+</html>
+

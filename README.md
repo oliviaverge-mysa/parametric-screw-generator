@@ -78,6 +78,7 @@ python -m screwgen.preview.preview_gallery
 python -m screwgen.preview.preview_thread_regions
 python -m screwgen.preview.preview_threads
 python -m screwgen.preview.preview_threads_gallery
+python -m screwgen.preview.preview_search --query "pan head diameter 8 head height 4 shank diameter 4 root diameter 3 length 25 tip length 3 pitch 1 thread length 20"
 ```
 
 Defaults are STEP-first for speed. Add `--stl` on preview commands when mesh exports are needed.
@@ -97,6 +98,34 @@ python preview_thread_regions.py
 python preview_threads.py
 python preview_threads_gallery.py
 ```
+
+### Local web chat UI
+Run a ChatGPT-style multi-chat interface with:
+- user/bot bubbles on opposite sides with different colors
+- inline message editing
+- interactive follow-up prompts for missing dimensions/suggestions
+- live STL preview
+- STEP/STL download buttons after generation
+
+```bash
+python run_web.py
+```
+
+Then open `http://127.0.0.1:8000`.
+
+On Windows, if your default Python is not CadQuery-compatible, use the project venv explicitly:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python -m pip install -e .
+.\.venv\Scripts\python -m uvicorn screwgen.webapp:app --app-dir src --host 127.0.0.1 --port 8002
+```
+
+### Plain-text query mode
+- Use `preview_search` for "search bar" style free text.
+- Missing dimensions are requested interactively before geometry is built.
+- Proportion checks use the screw size chart's part-to-part relationships (head/shank/root ratios), not fixed absolute sizes.
+- Unrealistic dimensions trigger a suggestion and confirmation prompt before generation continues.
 
 ### Output Conventions
 Exports are written under `out/` with deterministic names:
