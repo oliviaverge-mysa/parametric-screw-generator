@@ -39,6 +39,12 @@ _HEAD_TO_SHANK_MIN = min(_HEAD_TO_SHANK)
 _HEAD_TO_SHANK_MAX = max(_HEAD_TO_SHANK)
 _ROOT_TO_SHANK_MIN = min(_ROOT_TO_SHANK)
 _ROOT_TO_SHANK_MAX = max(_ROOT_TO_SHANK)
+_HEAD_H_TO_HEAD_D_BY_TYPE = {
+    "flat": 0.50,
+    "pan": 0.45,
+    "button": 0.38,
+    "hex": 0.62,
+}
 
 
 @dataclass
@@ -55,17 +61,23 @@ class ParsedQuery:
     thread_height: float | None
     thread_length: float | None
     thread_start: float | None
+    thread_spans: list[tuple[float, float]]
     drive_type: str | None
     drive_size: int | None
     size_number: int | None
 
 
 def _parse_numeric(token: str) -> float:
-    token = token.strip()
-    if "/" in token:
-        a, b = token.split("/", 1)
+    token = token.strip().lower()
+    token = re.sub(r"(?:mm|inches|inch|in|\"|')\b", "", token).strip()
+    m = re.search(r"-?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?", token)
+    if m is None:
+        raise ValueError(f"No numeric value found in {token!r}")
+    value = m.group(0)
+    if "/" in value:
+        a, b = value.split("/", 1)
         return float(a) / float(b)
-    return float(token)
+    return float(value)
 
 
 def _find_size_number(text: str) -> int | None:
@@ -119,6 +131,9 @@ def _find_overall_length(text: str) -> float | None:
     value = _find_labeled_value(text, ["overall length", "shaft length"])
     if value is not None:
         return value
+    m0 = re.search(r"(-?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s*(?:mm|in|inch|inches|\"|')?\s*long\b", text)
+    if m0:
+        return _parse_numeric(m0.group(1))
     m2 = re.search(
         r"(-?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s*(?:mm|in|inch|inches|\"|')?\s*(?<!thread\s)(?<!tip\s)length\b(?!\s*\d)",
         text,
@@ -142,7 +157,36 @@ def _find_thread_length(text: str) -> float | None:
     m = re.search(r"(-?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s*(?:mm|in|inch|inches|\"|')?\s*thread\b", text)
     if m:
         return _parse_numeric(m.group(1))
+    m2 = re.search(r"(-?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s*(?:mm|in|inch|inches|\"|')?\s*of\s*threads?\b", text)
+    if m2:
+        return _parse_numeric(m2.group(1))
     return None
+
+
+def _find_thread_spans(text: str) -> list[tuple[float, float]]:
+    if "thread" not in text:
+        return []
+    spans: list[tuple[float, float]] = []
+    range_pat = (
+        r"(-?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s*(?:mm|in|inch|inches|\"|')?\s*"
+        r"(?:-|to)\s*"
+        r"(-?\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)?)\s*(?:mm|in|inch|inches|\"|')?"
+    )
+    for m in re.finditer(range_pat, text):
+        try:
+            a = _parse_numeric(m.group(1))
+            b = _parse_numeric(m.group(2))
+        except ValueError:
+            continue
+        lo, hi = (a, b) if a <= b else (b, a)
+        if hi > lo:
+            spans.append((lo, hi))
+    # Deduplicate exact repeats while preserving order.
+    out: list[tuple[float, float]] = []
+    for span in spans:
+        if span not in out:
+            out.append(span)
+    return out
 
 
 def _infer_drive(text: str) -> tuple[str | None, int | None]:
@@ -182,8 +226,9 @@ def _infer_with_chart_ratios(parsed: ParsedQuery, prompt: PromptFn | None) -> No
         )
 
     if parsed.head_h is None and parsed.head_d is not None:
-        # Practical head-height default tied to head diameter when omitted.
-        parsed.head_h = max(0.18 * parsed.head_d, min(0.55 * parsed.head_d, 0.7 * parsed.head_d))
+        # Head-height defaults by style based on standards-inspired proportions.
+        ratio = _HEAD_H_TO_HEAD_D_BY_TYPE.get(parsed.head_type or "", 0.55)
+        parsed.head_h = ratio * parsed.head_d
     if parsed.tip_len is None and parsed.length is not None:
         parsed.tip_len = max(0.08 * parsed.length, min(0.15 * parsed.length, 0.28 * parsed.length))
 
@@ -206,6 +251,7 @@ def _validate_realism(parsed: ParsedQuery, prompt: PromptFn | None) -> None:
     assert parsed.root_d is not None
     assert parsed.length is not None
     assert parsed.tip_len is not None
+    assert parsed.head_h is not None
 
     head_ratio = parsed.head_d / parsed.shank_d
     root_ratio = parsed.root_d / parsed.shank_d
@@ -254,8 +300,9 @@ def _validate_realism(parsed: ParsedQuery, prompt: PromptFn | None) -> None:
             "head diameter",
         )
 
-    tip_low = 0.05 * parsed.length
-    tip_high = 0.35 * parsed.length
+    shaft_len_for_tip = max(parsed.length - parsed.head_h, 0.5 * parsed.length)
+    tip_low = 0.05 * shaft_len_for_tip
+    tip_high = 0.35 * shaft_len_for_tip
     if not (tip_low <= parsed.tip_len <= tip_high):
         suggested = max(tip_low, min(parsed.tip_len, tip_high))
         _apply_or_raise(
@@ -320,7 +367,18 @@ def parse_query(text: str) -> ParsedQuery:
 
     return ParsedQuery(
         head_type=head_type,
-        head_d=_find_labeled_value(t, ["head diameter", "head dia", "max head diameter", "diameter of head"]),
+        head_d=_find_labeled_value(
+            t,
+            [
+                "head diameter",
+                "head dia",
+                "head width",
+                "head wide",
+                "wide head",
+                "max head diameter",
+                "diameter of head",
+            ],
+        ),
         head_h=_find_labeled_value(t, ["head height", "head h", "head thickness"]),
         across_flats=_find_labeled_value(t, ["across flats", "acrossflats", "af"]),
         shank_d=_find_labeled_value(
@@ -334,6 +392,7 @@ def parse_query(text: str) -> ParsedQuery:
         thread_height=_find_labeled_value(t, ["thread height", "thread depth"]),
         thread_length=_find_thread_length(t),
         thread_start=_find_labeled_value(t, ["thread start", "start from head"]),
+        thread_spans=_find_thread_spans(t),
         drive_type=drive_type,
         drive_size=drive_size,
         size_number=_find_size_number(t),
@@ -351,14 +410,19 @@ def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpe
             parsed.head_type = prompt("Missing head type (flat/pan/button/hex): ").strip().lower()
         if parsed.head_d is None:
             parsed.head_d = _ask_number(prompt, "head diameter")
+        # Infer head height from standards unless user explicitly provided it.
+        _infer_with_chart_ratios(parsed, prompt=None)
         if parsed.head_h is None:
-            parsed.head_h = _ask_number(prompt, "head height")
+            parsed.head_h = 0.55 * float(parsed.head_d)
+            prompt(
+                f"No head height provided. Assuming head_height={parsed.head_h:.4f} from screw standards. Press Enter to continue."
+            )
         if parsed.shank_d is None:
             parsed.shank_d = _ask_number(prompt, "shank diameter (major)")
         if parsed.root_d is None:
             parsed.root_d = _ask_number(prompt, "root diameter (minor)")
         if parsed.length is None:
-            parsed.length = _ask_number(prompt, "overall shaft length")
+            parsed.length = _ask_number(prompt, "overall length (head top to tip)")
         if parsed.tip_len is None:
             parsed.tip_len = _ask_number(prompt, "tip length")
         if thread_intent and parsed.pitch is None:
@@ -396,38 +460,77 @@ def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpe
     _validate_realism(parsed, prompt)
     _infer_thread_defaults(parsed, thread_intent=thread_intent, prompt=prompt)
 
+    shaft_length = float(parsed.length) - float(parsed.head_h)
+    if shaft_length <= 0:
+        raise ValueError("Overall length must be larger than head height.")
+
     thread_start = parsed.thread_start if parsed.thread_start is not None else 0.0
-    max_threadable = float(parsed.length) - float(parsed.tip_len)
+    max_threadable = shaft_length - float(parsed.tip_len)
     if max_threadable <= 0:
         raise ValueError("Tip length must be smaller than shaft length.")
 
     regions = []
     if parsed.pitch is None:
-        regions = [SmoothRegionSpec(length=float(parsed.length))]
+        regions = [SmoothRegionSpec(length=shaft_length)]
     else:
-        if parsed.thread_length is None:
-            if prompt is None:
-                raise ValueError(
-                    "Missing thread length. Add 'thread length' to query or provide prompt callback."
+        if parsed.thread_spans:
+            # Explicit thread spans override single thread_length/thread_start.
+            clipped: list[tuple[float, float]] = []
+            for start, end in sorted(parsed.thread_spans):
+                s = max(0.0, start)
+                e = min(end, max_threadable)
+                if e - s > 1e-9:
+                    if clipped and s <= clipped[-1][1] + 1e-9:
+                        clipped[-1] = (clipped[-1][0], max(clipped[-1][1], e))
+                    else:
+                        clipped.append((s, e))
+            if not clipped:
+                raise ValueError("Thread spans are outside the threadable shaft range.")
+            cursor_len = 0.0
+            for s, e in clipped:
+                if s > cursor_len + 1e-9:
+                    regions.append(SmoothRegionSpec(length=s - cursor_len))
+                regions.append(
+                    ThreadRegionSpec(
+                        length=e - s,
+                        pitch=float(parsed.pitch),
+                        major_d=float(parsed.shank_d),
+                        thread_height=parsed.thread_height,
+                    )
                 )
-            if _confirm(prompt, f"No thread length found. Use max threadable length ({max_threadable:.4f})?"):
-                parsed.thread_length = max_threadable - thread_start
-            else:
-                parsed.thread_length = _ask_number(prompt, "thread length")
-        thread_length = float(parsed.thread_length)
-        if thread_start > 0:
-            regions.append(SmoothRegionSpec(length=thread_start))
-        regions.append(
-            ThreadRegionSpec(
-                length=thread_length,
-                pitch=float(parsed.pitch),
-                major_d=float(parsed.shank_d),
-                thread_height=parsed.thread_height,
+                cursor_len = e
+            tail = shaft_length - cursor_len
+            if tail > 1e-9:
+                regions.append(SmoothRegionSpec(length=tail))
+        else:
+            if parsed.thread_length is None:
+                if prompt is None:
+                    raise ValueError(
+                        "Missing thread length. Add 'thread length' or thread spans (e.g. 3-8 and 12-20)."
+                    )
+                if _confirm(prompt, f"No thread length found. Use max threadable length ({max_threadable:.4f})?"):
+                    parsed.thread_length = max_threadable - thread_start
+                else:
+                    parsed.thread_length = _ask_number(prompt, "thread length")
+            thread_length = float(parsed.thread_length)
+            thread_limit = shaft_length - thread_start
+            if thread_length > thread_limit:
+                thread_length = thread_limit
+            if thread_length <= 0:
+                raise ValueError("Thread length must be > 0 after accounting for overall length and thread start.")
+            if thread_start > 0:
+                regions.append(SmoothRegionSpec(length=thread_start))
+            regions.append(
+                ThreadRegionSpec(
+                    length=thread_length,
+                    pitch=float(parsed.pitch),
+                    major_d=float(parsed.shank_d),
+                    thread_height=parsed.thread_height,
+                )
             )
-        )
-        tail = float(parsed.length) - (thread_start + thread_length)
-        if tail > 1e-9:
-            regions.append(SmoothRegionSpec(length=tail))
+            tail = shaft_length - (thread_start + thread_length)
+            if tail > 1e-9:
+                regions.append(SmoothRegionSpec(length=tail))
 
     return ScrewSpec(
         head=HeadSpec(
@@ -448,7 +551,7 @@ def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpe
         ),
         shaft=ShaftSpec(
             d_minor=float(parsed.root_d),
-            L=float(parsed.length),
+            L=shaft_length,
             tip_len=float(parsed.tip_len),
         ),
         regions=regions,
