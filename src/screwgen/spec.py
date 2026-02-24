@@ -9,6 +9,7 @@ HeadType = Literal["flat", "pan", "button", "hex"]
 DriveType = Literal["hex", "phillips", "torx"]
 DriveFit = Literal["nominal", "scale_to_head", "max_that_fits"]
 Handedness = Literal["RH", "LH"]
+FastenerType = Literal["screw", "bolt"]
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ class ScrewSpec:
     drive: DriveSpec | None
     shaft: ShaftSpec
     regions: list[Region]
+    fastener_type: FastenerType = "screw"
 
 
 def expand_regions(spec: ScrewSpec) -> list[Region]:
@@ -91,10 +93,16 @@ def validate_screw_spec(spec: ScrewSpec) -> None:
         raise ValueError(f"shaft.d_minor must be > 0, got {spec.shaft.d_minor!r}")
     if spec.shaft.L <= 0:
         raise ValueError(f"shaft.L must be > 0, got {spec.shaft.L!r}")
-    if spec.shaft.tip_len <= 0 or spec.shaft.tip_len >= spec.shaft.L:
-        raise ValueError(
-            f"shaft.tip_len must be > 0 and < shaft.L, got tip_len={spec.shaft.tip_len!r}, L={spec.shaft.L!r}"
-        )
+    if spec.fastener_type == "screw":
+        if spec.shaft.tip_len <= 0 or spec.shaft.tip_len >= spec.shaft.L:
+            raise ValueError(
+                f"shaft.tip_len must be > 0 and < shaft.L for screw, got tip_len={spec.shaft.tip_len!r}, L={spec.shaft.L!r}"
+            )
+    else:
+        if spec.shaft.tip_len < 0 or spec.shaft.tip_len >= spec.shaft.L:
+            raise ValueError(
+                f"shaft.tip_len must be >= 0 and < shaft.L for bolt chamfer, got tip_len={spec.shaft.tip_len!r}, L={spec.shaft.L!r}"
+            )
     if spec.drive is not None:
         if spec.drive.depth is not None and spec.drive.depth <= 0:
             raise ValueError(f"drive.depth must be > 0 when provided, got {spec.drive.depth!r}")

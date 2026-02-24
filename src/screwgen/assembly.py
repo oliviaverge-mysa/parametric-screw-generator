@@ -64,8 +64,9 @@ def _drive_params_from_spec(d: DriveSpec, head_params: HeadParams) -> DriveParam
     )
 
 
-def _shaft_params_from_spec(s: ShaftSpec) -> ShaftParams:
-    return ShaftParams(d_minor=s.d_minor, L=s.L, tip_len=s.tip_len)
+def _shaft_params_from_spec(s: ShaftSpec, fastener_type: str) -> ShaftParams:
+    tip_style = "flat" if fastener_type == "bolt" else "pointed"
+    return ShaftParams(d_minor=s.d_minor, L=s.L, tip_len=s.tip_len, tip_style=tip_style)
 
 
 def shaft_axis_for_head(head_params: HeadParams, shaft_radius: float) -> tuple[float, int]:
@@ -135,7 +136,7 @@ def build_thread_region_markers(spec: ScrewSpec) -> cq.Workplane | None:
 def make_screw_from_spec(spec: ScrewSpec, include_thread_markers: bool = True) -> cq.Workplane:
     validate_screw_spec(spec)
     head_params = _head_params_from_spec(spec.head)
-    shaft_params = _shaft_params_from_spec(spec.shaft)
+    shaft_params = _shaft_params_from_spec(spec.shaft, spec.fastener_type)
     head = cached_make_head(head_params)
     if spec.drive is not None:
         head = apply_drive_to_head(head, _drive_params_from_spec(spec.drive, head_params), head_params)

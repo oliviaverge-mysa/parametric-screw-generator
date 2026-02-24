@@ -16,6 +16,7 @@ class ShaftParams:
     d_minor: float
     L: float
     tip_len: float
+    tip_style: str = "pointed"
     tip_angle_deg: Optional[float] = 60.0
     fillet_r: float = 0.0
     eps: float = 0.0
@@ -26,10 +27,18 @@ def _validate(p: ShaftParams) -> None:
         raise ValueError(f"d_minor must be > 0, got {p.d_minor!r}")
     if p.L <= 0:
         raise ValueError(f"L must be > 0, got {p.L!r}")
-    if p.tip_len <= 0:
-        raise ValueError(f"tip_len must be > 0, got {p.tip_len!r}")
-    if p.tip_len >= p.L:
-        raise ValueError(f"tip_len must be < L, got tip_len={p.tip_len!r}, L={p.L!r}")
+    if p.tip_style not in {"pointed", "flat", "flat_chamfer"}:
+        raise ValueError(f"tip_style must be 'pointed', 'flat', or 'flat_chamfer', got {p.tip_style!r}")
+    if p.tip_style == "pointed":
+        if p.tip_len <= 0:
+            raise ValueError(f"tip_len must be > 0 for pointed tip, got {p.tip_len!r}")
+        if p.tip_len >= p.L:
+            raise ValueError(f"tip_len must be < L, got tip_len={p.tip_len!r}, L={p.L!r}")
+    else:
+        if p.tip_len < 0:
+            raise ValueError(f"tip_len must be >= 0 for flat_chamfer, got {p.tip_len!r}")
+        if p.tip_len >= p.L:
+            raise ValueError(f"tip_len must be < L, got tip_len={p.tip_len!r}, L={p.L!r}")
     if p.tip_angle_deg is not None and not (20.0 <= p.tip_angle_deg <= 120.0):
         raise ValueError(f"tip_angle_deg must be in [20, 120] when provided, got {p.tip_angle_deg!r}")
     if p.fillet_r < 0:
@@ -41,17 +50,28 @@ def _validate(p: ShaftParams) -> None:
 def make_shaft(p: ShaftParams) -> cq.Workplane:
     _validate(p)
     r = p.d_minor / 2.0
-    z_shoulder = -(p.L - p.tip_len)
-    z_tip = -p.L
-    shaft = (
-        cq.Workplane("XZ")
-        .moveTo(0.0, 0.0)
-        .lineTo(r, 0.0)
-        .lineTo(r, z_shoulder)
-        .lineTo(0.0, z_tip)
-        .close()
-        .revolve(360, (0, 0, 0), (0, 1, 0))
-    )
+    if p.tip_style in {"flat", "flat_chamfer"}:
+        # Bolt baseline: always start from a true cylinder and keep end flat unless
+        # an explicit chamfer style is requested.
+        shaft = cq.Workplane("XY").circle(r).extrude(-p.L)
+        chamfer = min(max(0.0, p.tip_len), r * 0.3) if p.tip_style == "flat_chamfer" else 0.0
+        if chamfer > 0:
+            try:
+                shaft = shaft.faces("<Z").edges("%Circle").chamfer(chamfer)
+            except Exception:
+                pass
+    else:
+        z_shoulder = -(p.L - p.tip_len)
+        z_tip = -p.L
+        shaft = (
+            cq.Workplane("XZ")
+            .moveTo(0.0, 0.0)
+            .lineTo(r, 0.0)
+            .lineTo(r, z_shoulder)
+            .lineTo(0.0, z_tip)
+            .close()
+            .revolve(360, (0, 0, 0), (0, 1, 0))
+        )
     if p.fillet_r > 0:
         max_fillet = min(p.fillet_r, r * 0.49, p.tip_len * 0.49)
         if max_fillet > 0:

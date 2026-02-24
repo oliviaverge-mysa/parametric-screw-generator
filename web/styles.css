@@ -247,6 +247,28 @@ body {
   padding: 10px;
 }
 
+.choice-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.choice-btn {
+  border: 1px solid #000000;
+  background: #000000;
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.choice-btn:hover {
+  background: #ff66b6;
+  border-color: #ff66b6;
+}
+
 .composer button {
   border: 1px solid #000000;
   background: #000000;

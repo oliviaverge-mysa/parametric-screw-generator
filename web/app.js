@@ -18,6 +18,43 @@ let contextChatTitle = "";
 let editingMessageIdx = null;
 let editingDraft = "";
 
+async function sendMessage(rawValue) {
+  if (composerSendBtn.disabled) return;
+  if (!currentChatId) {
+    await createChat();
+  }
+  const raw = typeof rawValue === "string" ? rawValue : inputEl.value;
+  const content = raw.trim();
+  if (!content && !pendingQuestion) return;
+  inputEl.value = "";
+  setWorking(true);
+  try {
+    const res = await fetch(`/api/chats/${currentChatId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: pendingQuestion ? raw : content }),
+    });
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => ({ detail: "Request failed." }));
+      alert(errorBody.detail || "Could not process request.");
+      await loadChat(currentChatId);
+      return;
+    }
+    const data = await res.json();
+    if (!data.chat_id) {
+      alert("Request failed, please retry.");
+      await loadChat(currentChatId);
+      return;
+    }
+    await loadChat(data.chat_id);
+  } catch (_) {
+    alert("Network error while sending. Please retry.");
+    await loadChat(currentChatId);
+  } finally {
+    setWorking(false);
+  }
+}
+
 function renderChatList(chats) {
   chatListEl.innerHTML = "";
   for (const chat of chats) {
@@ -38,7 +75,7 @@ function renderChatList(chats) {
   }
 }
 
-function bubble(message, idx, latestUserIdx) {
+function bubble(message, idx, latestUserIdx, chat) {
   const node = document.createElement("div");
   node.className = `bubble ${message.role}`;
 
@@ -80,6 +117,52 @@ function bubble(message, idx, latestUserIdx) {
     const content = document.createElement("div");
     content.textContent = message.content;
     node.appendChild(content);
+  }
+
+  const isLastMessage = idx === chat.messages.length - 1;
+  const asksFastenerChoice =
+    message.role === "bot" &&
+    typeof message.content === "string" &&
+    /screw\s+or\s+(?:a\s+)?bolt/i.test(message.content);
+  const asksDriveChoice =
+    message.role === "bot" &&
+    !!chat.pending_question &&
+    /drive/i.test(chat.pending_question) &&
+    /\b(hex|phillips|torx|no drive)\b/i.test(chat.pending_question);
+  if (isLastMessage && asksFastenerChoice && chat.pending_question) {
+    const choices = document.createElement("div");
+    choices.className = "choice-actions";
+    for (const option of ["screw", "bolt"]) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "choice-btn";
+      btn.textContent = option[0].toUpperCase() + option.slice(1);
+      btn.onclick = async () => {
+        await sendMessage(option);
+      };
+      choices.appendChild(btn);
+    }
+    node.appendChild(choices);
+  } else if (isLastMessage && asksDriveChoice && chat.pending_question) {
+    const choices = document.createElement("div");
+    choices.className = "choice-actions";
+    const options = [
+      ["hex", "Hex"],
+      ["phillips", "Phillips"],
+      ["torx", "Torx"],
+      ["no drive", "No Drive"],
+    ];
+    for (const [value, label] of options) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "choice-btn";
+      btn.textContent = label;
+      btn.onclick = async () => {
+        await sendMessage(value);
+      };
+      choices.appendChild(btn);
+    }
+    node.appendChild(choices);
   }
 
   if (message.kind === "result" && message.stl_url) {
@@ -205,7 +288,7 @@ function initPreviewImage(container, previewUrl, hooks) {
     return;
   }
   const img = document.createElement("img");
-  img.alt = "Screw preview";
+  img.alt = "Fastener preview";
   img.onload = () => hooks.onReady();
   img.onerror = () => hooks.onError();
   img.src = previewUrl;
@@ -221,7 +304,7 @@ function renderMessages(chat) {
     .map((x) => x.i)
     .pop();
   chat.messages.forEach((msg, idx) => {
-    messagesEl.appendChild(bubble(msg, idx, latestUserIdx));
+    messagesEl.appendChild(bubble(msg, idx, latestUserIdx, chat));
   });
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -269,33 +352,14 @@ async function loadChat(chatId) {
 
 formEl.addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (!currentChatId) {
-    await createChat();
+  await sendMessage(inputEl.value);
+});
+
+inputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    sendMessage(inputEl.value);
   }
-  const raw = inputEl.value;
-  const content = raw.trim();
-  if (!content && !pendingQuestion) return;
-  inputEl.value = "";
-  setWorking(true);
-  const res = await fetch(`/api/chats/${currentChatId}/messages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: pendingQuestion ? raw : content }),
-  });
-  setWorking(false);
-  if (!res.ok) {
-    const errorBody = await res.json().catch(() => ({ detail: "Request failed." }));
-    alert(errorBody.detail || "Could not process request.");
-    await loadChat(currentChatId);
-    return;
-  }
-  const data = await res.json();
-  if (!data.chat_id) {
-    alert("Request failed, please retry.");
-    await loadChat(currentChatId);
-    return;
-  }
-  await loadChat(data.chat_id);
 });
 
 toggleSidebarBtn.addEventListener("click", () => {

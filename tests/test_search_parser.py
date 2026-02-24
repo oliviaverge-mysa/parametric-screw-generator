@@ -30,6 +30,16 @@ def test_parse_query_extracts_drive_type():
     assert parsed.drive_size == 6
 
 
+def test_parse_query_detects_bolt_fastener_type():
+    parsed = parse_query("hex bolt head diameter 12 shank diameter 6 root diameter 5 length 30")
+    assert parsed.fastener_type == "bolt"
+
+
+def test_parse_query_treats_bold_typo_as_bolt():
+    parsed = parse_query("flat bold head diameter 10 shank diameter 5 root diameter 4 length 30")
+    assert parsed.fastener_type == "bolt"
+
+
 def test_screw_spec_requires_missing_dimensions_when_non_interactive():
     q = "pan head diameter 8 shank diameter 4 root diameter 3"
     with pytest.raises(ValueError, match="Missing required dimensions"):
@@ -69,6 +79,55 @@ def test_screw_spec_sets_drive_when_requested():
     assert spec.drive.size == 6
 
 
+def test_screw_spec_prompts_for_fastener_type_when_missing():
+    q = "pan head diameter 8 shank diameter 4 root diameter 3 length 20 thread length 10 pitch 1"
+    answers = iter(["bolt", "no drive", "", ""])
+
+    def prompt(question: str) -> str:
+        if "Press Enter to continue" in question:
+            return ""
+        return next(answers)
+
+    spec = screw_spec_from_query(q, prompt=prompt)
+    assert spec.fastener_type == "bolt"
+
+
+def test_screw_spec_forces_flat_end_for_bolt():
+    q = "flat bolt head diameter 10 shank diameter 5 root diameter 4 length 30 pitch 1 thread length 18 tip length 3"
+    spec = screw_spec_from_query(q)
+    assert spec.fastener_type == "bolt"
+    assert spec.shaft.tip_len == 0.0
+
+
+def test_screw_spec_prompts_for_drive_when_unspecified():
+    q = "pan screw head diameter 8 head height 4 shank diameter 4 root diameter 3 length 22 tip length 2"
+    answers = iter(["torx"])
+
+    def prompt(question: str) -> str:
+        if "Press Enter to continue" in question:
+            return ""
+        return next(answers)
+
+    spec = screw_spec_from_query(q, prompt=prompt)
+    assert spec.drive is not None
+    assert spec.drive.type == "torx"
+
+
+def test_screw_spec_does_not_prompt_for_drive_when_no_drive_explicit():
+    q = "pan screw no drive head diameter 8 head height 4 shank diameter 4 root diameter 3 length 22 tip length 2"
+    asked: list[str] = []
+
+    def prompt(question: str) -> str:
+        asked.append(question)
+        if "Press Enter to continue" in question:
+            return ""
+        return ""
+
+    spec = screw_spec_from_query(q, prompt=prompt)
+    assert spec.drive is None
+    assert all("kind of drive" not in question.lower() for question in asked)
+
+
 def test_parser_handles_common_typos_and_infers_defaults():
     q = "16mm lenght, flat head, 12mm thread, 5mm head diamter"
     spec = screw_spec_from_query(q)
@@ -85,9 +144,11 @@ def test_unrealistic_root_ratio_gets_suggested_value_when_user_accepts():
         "pan head diameter 8 head height 4 shank diameter 4 root diameter 3.95 "
         "length 20 tip length 2 pitch 1 thread length 16 thread height 0.5"
     )
-    answers = iter(["", "n"])
+    answers = iter(["screw", "no drive", "", "n"])
 
-    def prompt(_: str) -> str:
+    def prompt(question: str) -> str:
+        if "Press Enter to continue" in question:
+            return ""
         return next(answers)
 
     spec = screw_spec_from_query(q, prompt=prompt)
@@ -104,7 +165,7 @@ def test_parse_query_reads_head_width_and_threads_of_phrase():
 def test_prompt_accepts_mm_and_infers_head_height_from_standards():
     q = "9mm long screw with a 4mm wide head and 4mm of threads"
     asked: list[str] = []
-    answers = iter(["flat", "2.5mm", "2.0mm"])
+    answers = iter(["flat", "2.5mm", "2.0mm", "no drive"])
 
     def prompt(question: str) -> str:
         asked.append(question)

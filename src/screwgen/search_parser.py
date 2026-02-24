@@ -49,6 +49,7 @@ _HEAD_H_TO_HEAD_D_BY_TYPE = {
 
 @dataclass
 class ParsedQuery:
+    fastener_type: str | None
     head_type: str | None
     head_d: float | None
     head_h: float | None
@@ -64,6 +65,7 @@ class ParsedQuery:
     thread_spans: list[tuple[float, float]]
     drive_type: str | None
     drive_size: int | None
+    drive_explicit_none: bool
     size_number: int | None
 
 
@@ -120,6 +122,10 @@ def _normalize_typos(text: str) -> str:
         r"\bthead\b": "thread",
         r"\btorqs\b": "torx",
         r"\bphilips\b": "phillips",
+        r"\bbold\b": "bolt",
+        r"\bblot\b": "bolt",
+        r"\bolt\b": "bolt",
+        r"\bbolr\b": "bolt",
     }
     for pat, rep in replacements.items():
         out = re.sub(pat, rep, out)
@@ -189,14 +195,42 @@ def _find_thread_spans(text: str) -> list[tuple[float, float]]:
     return out
 
 
+def _infer_fastener_type(text: str) -> str | None:
+    has_bolt = re.search(r"\bbolt(s)?\b", text) is not None
+    has_screw = re.search(r"\bscrew(s)?\b", text) is not None
+    # Be conservative: if "bolt" appears anywhere, honor bolt intent.
+    if has_bolt:
+        return "bolt"
+    if has_screw:
+        return "screw"
+    return None
+
+
 def _infer_drive(text: str) -> tuple[str | None, int | None]:
-    if re.search(r"\b(no drive|without drive|plain head)\b", text):
-        return None, None
     if re.search(r"\b(torx|star drive)\b", text):
         return "torx", 6
     if re.search(r"\b(phillips|philips|cross[- ]head)\b", text):
         return "phillips", 4
     if re.search(r"\b(hex drive|allen|hex socket|socket head)\b", text):
+        return "hex", 3
+    return None, None
+
+
+def _has_explicit_no_drive(text: str) -> bool:
+    return re.search(r"\b(no drive|without drive|plain head|no recess|no socket)\b", text) is not None
+
+
+def _parse_drive_answer(raw: str) -> tuple[str | None, int | None]:
+    a = raw.strip().lower()
+    if not a:
+        return None, None
+    if re.search(r"\b(no drive|without drive|plain head|none|no)\b", a):
+        return None, None
+    if "torx" in a or "star" in a:
+        return "torx", 6
+    if "phillips" in a or "philips" in a or "cross" in a:
+        return "phillips", 4
+    if "hex" in a or "allen" in a or "socket" in a:
         return "hex", 3
     return None, None
 
@@ -230,7 +264,11 @@ def _infer_with_chart_ratios(parsed: ParsedQuery, prompt: PromptFn | None) -> No
         ratio = _HEAD_H_TO_HEAD_D_BY_TYPE.get(parsed.head_type or "", 0.55)
         parsed.head_h = ratio * parsed.head_d
     if parsed.tip_len is None and parsed.length is not None:
-        parsed.tip_len = max(0.08 * parsed.length, min(0.15 * parsed.length, 0.28 * parsed.length))
+        if parsed.fastener_type == "bolt":
+            base = parsed.shank_d or (parsed.head_d * 0.45 if parsed.head_d is not None else 1.0)
+            parsed.tip_len = max(0.08, 0.08 * base)
+        else:
+            parsed.tip_len = max(0.08 * parsed.length, min(0.15 * parsed.length, 0.28 * parsed.length))
 
 
 def _ask_number(prompt: PromptFn, label: str) -> float:
@@ -301,15 +339,26 @@ def _validate_realism(parsed: ParsedQuery, prompt: PromptFn | None) -> None:
         )
 
     shaft_len_for_tip = max(parsed.length - parsed.head_h, 0.5 * parsed.length)
-    tip_low = 0.05 * shaft_len_for_tip
-    tip_high = 0.35 * shaft_len_for_tip
-    if not (tip_low <= parsed.tip_len <= tip_high):
-        suggested = max(tip_low, min(parsed.tip_len, tip_high))
-        _apply_or_raise(
-            f"Tip length {parsed.tip_len:.4f} looks unusual for length {parsed.length:.4f}.",
-            suggested,
-            "tip length",
-        )
+    if parsed.fastener_type == "bolt":
+        tip_low = 0.0
+        tip_high = 0.12 * parsed.shank_d
+        if not (tip_low <= parsed.tip_len <= tip_high):
+            suggested = max(tip_low, min(parsed.tip_len, tip_high))
+            _apply_or_raise(
+                f"Bolt chamfer {parsed.tip_len:.4f} looks unusual for shank diameter {parsed.shank_d:.4f}.",
+                suggested,
+                "tip length",
+            )
+    else:
+        tip_low = 0.05 * shaft_len_for_tip
+        tip_high = 0.35 * shaft_len_for_tip
+        if not (tip_low <= parsed.tip_len <= tip_high):
+            suggested = max(tip_low, min(parsed.tip_len, tip_high))
+            _apply_or_raise(
+                f"Tip length {parsed.tip_len:.4f} looks unusual for length {parsed.length:.4f}.",
+                suggested,
+                "tip length",
+            )
     if parsed.head_h is not None and parsed.head_h >= parsed.head_d:
         suggested = max(0.25 * parsed.head_d, min(parsed.head_h, 0.7 * parsed.head_d))
         _apply_or_raise(
@@ -366,6 +415,7 @@ def parse_query(text: str) -> ParsedQuery:
     drive_type, drive_size = _infer_drive(t)
 
     return ParsedQuery(
+        fastener_type=_infer_fastener_type(t),
         head_type=head_type,
         head_d=_find_labeled_value(
             t,
@@ -395,6 +445,7 @@ def parse_query(text: str) -> ParsedQuery:
         thread_spans=_find_thread_spans(t),
         drive_type=drive_type,
         drive_size=drive_size,
+        drive_explicit_none=_has_explicit_no_drive(t),
         size_number=_find_size_number(t),
     )
 
@@ -406,6 +457,14 @@ def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpe
     _infer_with_chart_ratios(parsed, prompt)
 
     if prompt is not None:
+        if parsed.fastener_type is None:
+            ft = prompt("Is this a screw or a bolt? [screw/bolt]: ").strip().lower()
+            if ft in {"screw", "bolt"}:
+                parsed.fastener_type = ft
+        if parsed.fastener_type is None:
+            parsed.fastener_type = "screw"
+        if parsed.fastener_type == "bolt":
+            parsed.tip_len = 0.0
         if parsed.head_type is None:
             parsed.head_type = prompt("Missing head type (flat/pan/button/hex): ").strip().lower()
         if parsed.head_d is None:
@@ -424,12 +483,22 @@ def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpe
         if parsed.length is None:
             parsed.length = _ask_number(prompt, "overall length (head top to tip)")
         if parsed.tip_len is None:
-            parsed.tip_len = _ask_number(prompt, "tip length")
+            _infer_with_chart_ratios(parsed, prompt=None)
+            if parsed.tip_len is None:
+                parsed.tip_len = _ask_number(prompt, "tip length")
+        if parsed.drive_type is None and not parsed.drive_explicit_none:
+            dt, ds = _parse_drive_answer(prompt("What kind of drive is it? [hex/phillips/torx/no drive]: "))
+            parsed.drive_type = dt
+            parsed.drive_size = ds
         if thread_intent and parsed.pitch is None:
             _infer_thread_defaults(parsed, thread_intent=True, prompt=prompt)
         if thread_intent and parsed.pitch is None:
             parsed.pitch = _ask_number(prompt, "thread pitch (or 1/TPI)")
     else:
+        if parsed.fastener_type is None:
+            parsed.fastener_type = "screw"
+        if parsed.fastener_type == "bolt":
+            parsed.tip_len = 0.0
         missing: list[str] = []
         for label, value in (
             ("head type", parsed.head_type),
@@ -454,6 +523,8 @@ def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpe
 
     if parsed.head_type not in {"flat", "pan", "button", "hex"}:
         raise ValueError(f"Unsupported head type {parsed.head_type!r}.")
+    if parsed.fastener_type not in {"screw", "bolt"}:
+        raise ValueError(f"Unsupported fastener type {parsed.fastener_type!r}.")
     if parsed.head_type == "hex" and parsed.across_flats is None and parsed.head_d is not None:
         parsed.across_flats = parsed.head_d * 0.8660254
 
@@ -555,5 +626,6 @@ def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpe
             tip_len=float(parsed.tip_len),
         ),
         regions=regions,
+        fastener_type=parsed.fastener_type,  # type: ignore[arg-type]
     )
 
