@@ -129,6 +129,10 @@ function bubble(message, idx, latestUserIdx, chat) {
     !!chat.pending_question &&
     /drive/i.test(chat.pending_question) &&
     /\b(hex|phillips|torx|no drive)\b/i.test(chat.pending_question);
+  const asksYesNoChoice =
+    message.role === "bot" &&
+    !!chat.pending_question &&
+    /\[y\/N\]:\s*$/i.test(chat.pending_question);
   if (isLastMessage && asksFastenerChoice && chat.pending_question) {
     const choices = document.createElement("div");
     choices.className = "choice-actions";
@@ -151,6 +155,24 @@ function bubble(message, idx, latestUserIdx, chat) {
       ["phillips", "Phillips"],
       ["torx", "Torx"],
       ["no drive", "No Drive"],
+    ];
+    for (const [value, label] of options) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "choice-btn";
+      btn.textContent = label;
+      btn.onclick = async () => {
+        await sendMessage(value);
+      };
+      choices.appendChild(btn);
+    }
+    node.appendChild(choices);
+  } else if (isLastMessage && asksYesNoChoice && chat.pending_question) {
+    const choices = document.createElement("div");
+    choices.className = "choice-actions";
+    const options = [
+      ["y", "Yes"],
+      ["n", "No"],
     ];
     for (const [value, label] of options) {
       const btn = document.createElement("button");

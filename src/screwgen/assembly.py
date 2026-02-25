@@ -141,34 +141,28 @@ def make_screw_from_spec(spec: ScrewSpec, include_thread_markers: bool = True) -
     if spec.drive is not None:
         head = apply_drive_to_head(head, _drive_params_from_spec(spec.drive, head_params), head_params)
     shaft = cached_make_shaft(shaft_params)
-    thread_regions = [r for r in spec.regions if isinstance(r, ThreadRegionSpec)]
-    if len(thread_regions) > 1:
-        raise NotImplementedError("v1 real thread geometry supports only one ThreadRegionSpec.")
-    if len(thread_regions) == 1:
-        tr = thread_regions[0]
-        thread_start = 0.0
-        for region in expand_regions(spec):
-            if region is tr:
-                break
-            thread_start += region.length
-        # Thread math is defined in +Z shaft-local coordinates; convert in/out.
-        shaft_up = shaft.rotate((0, 0, 0), (1, 0, 0), 180)
-        shaft_up = apply_external_thread(
-            shaft_up,
-            spec.shaft,
-            ThreadParams(
-                pitch=tr.pitch,
-                length=tr.length,
-                start_from_head=thread_start,
-                included_angle_deg=60.0,
-                major_d=tr.major_d,
-                thread_height=tr.thread_height,
-                handedness=tr.handedness,
-                starts=tr.starts,
-                mode="add",
-            ),
-        )
-        shaft = shaft_up.rotate((0, 0, 0), (1, 0, 0), 180)
+    # Thread math is defined in +Z shaft-local coordinates; convert in/out.
+    shaft_up = shaft.rotate((0, 0, 0), (1, 0, 0), 180)
+    thread_start = 0.0
+    for region in expand_regions(spec):
+        if isinstance(region, ThreadRegionSpec):
+            shaft_up = apply_external_thread(
+                shaft_up,
+                spec.shaft,
+                ThreadParams(
+                    pitch=region.pitch,
+                    length=region.length,
+                    start_from_head=thread_start,
+                    included_angle_deg=60.0,
+                    major_d=region.major_d,
+                    thread_height=region.thread_height,
+                    handedness=region.handedness,
+                    starts=region.starts,
+                    mode="add",
+                ),
+            )
+        thread_start += region.length
+    shaft = shaft_up.rotate((0, 0, 0), (1, 0, 0), 180)
 
     screw = attach_shaft_to_head(head, head_params, shaft)
     if not include_thread_markers:

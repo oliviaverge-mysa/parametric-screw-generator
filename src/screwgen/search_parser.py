@@ -298,8 +298,8 @@ def _validate_realism(parsed: ParsedQuery, prompt: PromptFn | None) -> None:
 
     def _apply_or_raise(message: str, suggested: float, field: str) -> None:
         if prompt is None:
-            raise ValueError(f"{message} Suggested {field}={suggested:.4f}.")
-        keep = _confirm(prompt, f"{message} Suggested {field}: {suggested:.4f}. Keep your value?")
+            raise ValueError(f"{message} Suggested {field}={suggested:.2f}.")
+        keep = _confirm(prompt, f"{message} Suggested {field}: {suggested:.2f}. Keep your value?")
         if not keep:
             if field == "head diameter":
                 parsed.head_d = suggested
@@ -312,14 +312,14 @@ def _validate_realism(parsed: ParsedQuery, prompt: PromptFn | None) -> None:
 
     if not (head_range[0] <= head_ratio <= head_range[1]):
         _apply_or_raise(
-            f"Head/shank ratio {head_ratio:.3f} looks unrealistic.",
+            f"Head/shank ratio {head_ratio:.2f} looks unrealistic.",
             parsed.shank_d * _HEAD_TO_SHANK_MEDIAN,
             "head diameter",
         )
 
     if not (root_range[0] <= root_ratio <= root_range[1]):
         _apply_or_raise(
-            f"Root/shank ratio {root_ratio:.3f} looks unrealistic.",
+            f"Root/shank ratio {root_ratio:.2f} looks unrealistic.",
             parsed.shank_d * _ROOT_TO_SHANK_MEDIAN,
             "root diameter",
         )
@@ -345,7 +345,7 @@ def _validate_realism(parsed: ParsedQuery, prompt: PromptFn | None) -> None:
         if not (tip_low <= parsed.tip_len <= tip_high):
             suggested = max(tip_low, min(parsed.tip_len, tip_high))
             _apply_or_raise(
-                f"Bolt chamfer {parsed.tip_len:.4f} looks unusual for shank diameter {parsed.shank_d:.4f}.",
+                f"Bolt chamfer {parsed.tip_len:.2f} looks unusual for shank diameter {parsed.shank_d:.2f}.",
                 suggested,
                 "tip length",
             )
@@ -355,14 +355,14 @@ def _validate_realism(parsed: ParsedQuery, prompt: PromptFn | None) -> None:
         if not (tip_low <= parsed.tip_len <= tip_high):
             suggested = max(tip_low, min(parsed.tip_len, tip_high))
             _apply_or_raise(
-                f"Tip length {parsed.tip_len:.4f} looks unusual for length {parsed.length:.4f}.",
+                f"Tip length {parsed.tip_len:.2f} looks unusual for length {parsed.length:.2f}.",
                 suggested,
                 "tip length",
             )
     if parsed.head_h is not None and parsed.head_h >= parsed.head_d:
         suggested = max(0.25 * parsed.head_d, min(parsed.head_h, 0.7 * parsed.head_d))
         _apply_or_raise(
-            f"Head height {parsed.head_h:.4f} is unrealistic vs head diameter {parsed.head_d:.4f}.",
+            f"Head height {parsed.head_h:.2f} is unrealistic vs head diameter {parsed.head_d:.2f}.",
             suggested,
             "head height",
         )

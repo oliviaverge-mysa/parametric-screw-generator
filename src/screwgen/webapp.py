@@ -443,11 +443,16 @@ def _write_engineering_drawing_pdf(
             c.line(x1, y1, x2, y2)
     else:
         c.circle(top_cx, top_cy, top_r, stroke=1, fill=0)
+    # Centerlines: dashed so drive outline remains the dominant visible feature.
+    c.setDash([2, 2], 0)
+    c.setLineWidth(0.8)
     c.line(top_cx - top_r * 1.1, top_cy, top_cx + top_r * 1.1, top_cy)
     c.line(top_cx, top_cy - top_r * 1.1, top_cx, top_cy + top_r * 1.1)
+    c.setDash([], 0)
+    c.setLineWidth(1.2)
     if drive == "phillips":
-        c.line(top_cx - top_r * 0.42, top_cy, top_cx + top_r * 0.42, top_cy)
-        c.line(top_cx, top_cy - top_r * 0.42, top_cx, top_cy + top_r * 0.42)
+        c.line(top_cx - top_r * 0.48, top_cy, top_cx + top_r * 0.48, top_cy)
+        c.line(top_cx, top_cy - top_r * 0.48, top_cx, top_cy + top_r * 0.48)
     elif drive == "torx":
         c.circle(top_cx, top_cy, top_r * 0.28, stroke=1, fill=0)
         c.circle(top_cx, top_cy, top_r * 0.17, stroke=1, fill=0)
@@ -461,6 +466,7 @@ def _write_engineering_drawing_pdf(
             x1, y1 = pts[i]
             x2, y2 = pts[(i + 1) % 6]
             c.line(x1, y1, x2, y2)
+    c.setLineWidth(1)
 
     c.setFont("Helvetica-Bold", 10)
     c.drawString(side_x, side_y + head_r + 22, "SIDE VIEW")
@@ -693,7 +699,18 @@ def _attempt_build(chat: ChatState) -> dict[str, Any]:
     drawing_path = _DOWNLOAD_DIR / f"{stem}_drawing.pdf"
     bundle_path = _DOWNLOAD_DIR / f"{stem}_bundle.zip"
     try:
-        exporters.export(screw, str(preview_path), exportType="SVG")
+        if spec.head.type == "flat":
+            # For flat heads, flip preview orientation so the drive/head face
+            # is presented toward the viewer instead of the underside.
+            preview_model = screw.rotate((0, 0, 0), (1, 0, 0), 180)
+            exporters.export(
+                preview_model,
+                str(preview_path),
+                exportType="SVG",
+                opt={"projectionDir": (0.25, -0.15, 1.0), "showAxes": False, "showHidden": False},
+            )
+        else:
+            exporters.export(screw, str(preview_path), exportType="SVG")
         preview_url = f"/downloads/{preview_path.name}"
     except Exception:
         preview_url = ""
