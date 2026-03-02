@@ -1,68 +1,95 @@
-# Screw Generator Architecture (CadQuery / OCCT)
+# Fastener Generator Architecture
 
-## Goal
-Generate parametric screws as CAD solids with:
-- Head (4 types)
-- Drive recess (3 types, separate cut)
-- Shaft (core cylinder + pointed tip)
-- Later: thread geometry + engineering drawing output
+## Purpose
+Generate parametric fasteners from plain text and interactive chat prompts, then export:
+- STEP
+- STL
+- Preview SVG
+- Engineering drawing PDF
+- ZIP bundle (all files)
 
-Outputs:
-- STEP (B-Rep solid)
-- STL (mesh)
+The system supports:
+- screw/bolt mode selection
+- head + drive + shaft modeling
+- single or multi-region external threads
+- matching nut generation (hex/square)
 
-## Global Coordinate Conventions
-All geometry is centered on the Z axis.
+## High-Level Flow
+1. User sends plain-text request in web chat.
+2. Parser extracts dimensions/features from text.
+3. Missing values are requested interactively.
+4. Realism checks can ask confirmation (Yes/No).
+5. Spec is assembled and converted into CAD geometry.
+6. Exports are generated and attached to the result message.
+7. Optional follow-up generates a matching nut.
 
-### Head coordinates
-- Head occupies `Z in [0, h_head]`
-- `Z = 0` is the shaft-attachment reference plane for most heads
-- Tool face (drive start plane) is defined per head type
+## Core Modules
+- `src/screwgen/search_parser.py`
+  - Text parsing, typo normalization, inference defaults, realism prompts.
+  - Detects `screw` vs `bolt`, head type, drive, dimensions, and thread regions.
+- `src/screwgen/spec.py`
+  - Immutable data model (`ScrewSpec`, head/drive/shaft/regions).
+- `src/screwgen/heads.py`
+  - Head solids (`flat`, `pan`, `button`, `hex`).
+- `src/screwgen/drives.py`
+  - Drive cut solids (`hex`, `phillips`, `torx`).
+- `src/screwgen/shaft.py`
+  - Shaft generation:
+    - `pointed` (screw)
+    - `flat` (bolt)
+- `src/screwgen/threads.py`
+  - External helical thread application on shaft-local +Z solids.
+- `src/screwgen/assembly.py`
+  - Builds the final fastener from spec and applies all thread regions.
+- `src/screwgen/webapp.py`
+  - FastAPI app + chat state machine + export pipeline + drawing generation.
+  - Matching-nut flow and nut CAD generation.
 
-### Shaft coordinates (local)
-- Shaft is generated with its attachment face at `Z = 0`
-- Shaft length extends away from attachment face to the pointed tip
-- Default shaft local orientation is transformed during assembly as needed
+## Interaction Model (Web Chat)
+### Prompt Types
+- Screw/Bolt choice prompt (buttons)
+- Drive type prompt (buttons)
+- Yes/No confirmations (buttons)
+- Matching nut offer (buttons)
+- Matching nut style (`hex`/`square`) prompt (buttons)
 
-### Assembly expectation
-Build a single watertight solid in this order:
-1) build head
-2) cut drive (`head - drive_cut`)
-3) union shaft (`head_with_drive ∪ shaft`)
+### Chat State
+`ChatState` tracks:
+- `query`, `messages`
+- `pending_question`, `answers`
+- `pending_flow` (multi-step post-generation flows)
+- `latest_spec`, `latest_files`
 
-## Head Types
-- `flat`: conical frustum (inverted cone), large face and cone side defined explicitly
-- `pan`: cylinder + spherical cap, `r = min(d*0.25, h*0.5)`
-- `button`: cylinder + more domed spherical cap, `r = min(d*0.4, h*0.8)`
-- `hex`: hexagonal prism, `acrossFlats` provided or defaulted
+## Geometry Rules
+### Fastener Type
+- `screw`: shaft tip may be pointed.
+- `bolt`: shaft end is flat (`tip_len = 0` enforced).
 
-## Drive Types
-Drive is implemented as a separate cut solid:
-- hex (size 3)
-- phillips (size 4)
-- torx (size 6)
+### Thread Regions
+- Supports multiple thread spans (e.g., `3-9` and `14-20`).
+- Assembly applies thread geometry region-by-region in sequence.
 
-Drive bottom profile is modeled as:
-- `(drive footprint prism) ∩ (cone/frustum)`
+### Matching Nut
+- Generated from latest threaded fastener.
+- Styles: `hex` or `square`.
+- Internal thread is produced by subtracting a threaded tap solid.
+- Falls back to a clearance bore only if helical boolean fails.
 
-## Shaft
-No threads yet:
-- minor-diameter cylinder
-- pointed cone tip
+## Drawing Generation
+- Main fastener drawing:
+  - side view, top view, dimensions, title block, isometric.
+- Nut drawing:
+  - aligned top/side views, dimensions, thread metadata.
 
-Parameters:
-- `d_minor`
-- `L`
-- `tip_len`
+## Export Conventions
+Files are written to `out/web/` with descriptive stems:
+- `<stem>.step`
+- `<stem>.stl`
+- `<stem>.svg`
+- `<stem>_drawing.pdf`
+- `<stem>_bundle.zip`
 
-## Preview / Gallery Policy
-Preview modules export:
-- individual examples (STEP + STL)
-- combined gallery STEP
-- sectioned gallery STEP for recess/junction inspection
-
-## Non-goals (current)
-- No threads yet
-- No standards-certified geometry yet
-- No confidential data in docs or outputs
+## Current Constraints
+- Geometry is practical/preview-oriented (not standards-certified).
+- Some extreme parameter combinations can still trigger boolean fallback behavior.
 

@@ -1,317 +1,158 @@
-# ScrewGen
+# Fastener Generator
 
-## Project Overview
-ScrewGen is a parametric screw generator built with CadQuery (OpenCascade/OCCT). It exports STEP (B-Rep) and STL (mesh) for CAD review and downstream workflows.
+Parametric CAD fastener generator with a chat-based web UI.
 
-Implemented today:
-- Heads: `flat`, `pan`, `button`, `hex`
-- Drives: `hex(3)`, `phillips(4)`, `torx(6)`
-- Shafts: minor-diameter cylinder + pointed tip
-- Screw-level `ScrewSpec` with shaft region modeling (`Smooth` / `Thread`) for thread-ready planning
-- Gallery exports, including sectioned views
+It builds screws/bolts (and matching nuts), then exports:
+- STEP
+- STL
+- Preview SVG
+- Engineering drawing PDF
+- ZIP bundle
 
-Real helical thread geometry is not implemented yet.
+## What It Supports
 
-## Features
-- Parametric head/drive/shaft inputs
-- Drive recess generated as a separate cut solid
-- Region-aware screw specification for future partial/multi-thread layouts
-- Placeholder thread-region sleeve markers (no helix) for validating region placement
-- Robust boolean operations for cut/union workflows
-- Preview/export harnesses for individual parts and combined galleries
+### Fasteners
+- Head types: `flat`, `pan`, `button`, `hex`
+- Drive types: `hex`, `phillips`, `torx`, or `no drive`
+- Fastener type: `screw` or `bolt`
+  - screw: pointed tip allowed
+  - bolt: flat end enforced
 
-## Repository Structure
-```text
-src/screwgen/
-  __init__.py
-  heads.py
-  drives.py
-  shaft.py
-  assembly.py
-  spec.py
-  export.py
-  preview/
-    __init__.py
-    preview_heads.py
-    preview_drives.py
-    preview_shafts.py
-    preview_gallery.py
-    preview_thread_regions.py
+### Threads
+- Thread pitch/height inference when omitted
+- Single threaded length or multi-span threading
+  - example: `thread 3-9 and 14-20`
 
-tests/
-  test_heads.py
-  test_drives.py
-  test_shafts.py
-  test_assembly.py
-  test_spec_regions.py
-```
+### Matching Nut Flow
+- After generation, chat asks:
+  - `Do you want a matching nut?`
+  - `What style for the matching nut?`
+- Nut styles: `hex` or `square`
+- Generates matching nut exports (STEP/STL/PDF/ZIP)
 
-Root-level compatibility wrappers are kept for legacy commands (`preview.py`, `preview_drives.py`, `preview_shafts.py`, `preview_screws.py`).
+### Drawings
+- Main fastener engineering drawing PDF (top/side/isometric + dimensions)
+- Matching nut drawing PDF (aligned top/side views + key dimensions)
 
-## Installation
-Assumptions:
-- Python 3.11+
-- A runtime compatible with CadQuery wheels
+## Quick Start
 
-### Option A: editable install (recommended)
-```bash
-python -m venv .venv
-. .venv/Scripts/activate
-pip install -e .
-```
-
-### Option B: requirements install
-```bash
-python -m venv .venv
-. .venv/Scripts/activate
-pip install -r requirements.txt
-```
-
-## Usage
-Run preview modules:
-
-```bash
-python -m screwgen.preview.preview_heads
-python -m screwgen.preview.preview_drives
-python -m screwgen.preview.preview_shafts
-python -m screwgen.preview.preview_gallery
-python -m screwgen.preview.preview_thread_regions
-python -m screwgen.preview.preview_threads
-python -m screwgen.preview.preview_threads_gallery
-python -m screwgen.preview.preview_search --query "pan head diameter 8 head height 4 shank diameter 4 root diameter 3 length 25 tip length 3 pitch 1 thread length 20"
-```
-
-Defaults are STEP-first for speed. Add `--stl` on preview commands when mesh exports are needed.
-For threaded gallery:
-- quick review: `python -m screwgen.preview.preview_threads_gallery`
-- include individual screws: `... --individual`
-- include STL: `... --individual --stl`
-
-Legacy wrappers remain valid:
-
-```bash
-python preview.py
-python preview_drives.py
-python preview_shafts.py
-python preview_screws.py
-python preview_thread_regions.py
-python preview_threads.py
-python preview_threads_gallery.py
-```
-
-### Local web chat UI
-Run a ChatGPT-style multi-chat interface with:
-- user/bot bubbles on opposite sides with different colors
-- inline message editing
-- interactive follow-up prompts for missing dimensions/suggestions
-- live STL preview
-- STEP/STL download buttons after generation
-
-```bash
-python run_web.py
-```
-
-Then open `http://127.0.0.1:8000`.
-
-On Windows, if your default Python is not CadQuery-compatible, use the project venv explicitly:
-
+### 1) Create environment
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\python -m pip install -e .
+```
+
+### 2) Run web app
+```powershell
 .\.venv\Scripts\python -m uvicorn screwgen.webapp:app --app-dir src --host 127.0.0.1 --port 8002
 ```
 
-### Plain-text query mode
-- Use `preview_search` for "search bar" style free text.
-- Missing dimensions are requested interactively before geometry is built.
-- Proportion checks use the screw size chart's part-to-part relationships (head/shank/root ratios), not fixed absolute sizes.
-- Unrealistic dimensions trigger a suggestion and confirmation prompt before generation continues.
+### 3) Open in browser
+`http://127.0.0.1:8002`
 
-### Output Conventions
-Exports are written under `out/` with deterministic names:
-- `out/heads/step`, `out/heads/stl`
-- `out/drives/step`, `out/drives/stl`
-- `out/shafts/step`, `out/shafts/stl`
-- `out/screws/step`, `out/screws/stl`
-- `out/galleries/step`
-- `out/galleries/sectioned/step`
+## Usage Notes
 
-Examples:
-- `head_<type>.step`, `head_<type>.stl`
-- `screw_<head>__<drive>__A.step`
-- `screw_gallery.step`, `screw_gallery_section.step`
-- `thread_region_gallery.step`, `thread_region_gallery_section.step`
+- Free-text input is parsed for dimensions and options.
+- If details are missing, the app asks follow-up questions.
+- Option questions render as in-chat buttons (not manual typing).
+- Unrealistic dimensions trigger a confirmation prompt.
 
-## Testing
-Run all tests:
+Example prompt:
+`pan head diameter 10 shank diameter 5 root diameter 4 length 30 pitch 1 thread length 18`
 
-```bash
-pytest
-```
+## Common Use Cases
 
-## Roadmap
-- Real helical thread generation from region definitions
-- Standards-aligned pitch and size tables
-- Automated engineering drawing generation
-- Optional structured input / text parsing interface
+- **Quick custom screw/bolt generation** from one plain-English prompt.
+- **Interactive completion** when values are missing (buttons for screw/bolt, drive, confirmations).
+- **Partial-thread designs** using explicit thread spans (e.g., `thread 3-9 and 14-20`).
+- **Fastener realism checks** with suggestion + accept/reject flow.
+- **Matching nut creation** for generated threaded fasteners.
+- **Export-ready package** (STEP/STL/preview/drawing/ZIP) for downstream CAD work.
 
-## Non-goals / Notes
-- No confidential information is stored in this repository.
-- Geometry is not standards-certified yet; values are practical and preview-oriented.
+## Test Prompts
 
-# ScrewGen
+### 1) Full guided flow (buttons)
+`pan head diameter 10 shank diameter 5 root diameter 4 length 30 pitch 1 thread height 0.5 thread length 18`
 
-## Project Overview
-ScrewGen is a parametric screw generator built with CadQuery (OpenCascade/OCCT). It generates CAD solids as STEP (B-Rep) and STL (mesh) for review and downstream workflows.
+Expected:
+- asks screw/bolt (buttons)
+- asks drive (buttons)
+- generates fastener files
+- asks matching nut (Yes/No buttons)
+- asks nut style (Hex/Square buttons)
 
-Current implemented geometry:
-- Heads: `flat`, `pan`, `button`, `hex`
-- Drives: `hex(3)`, `phillips(4)`, `torx(6)`
-- Shafts: minor-diameter cylinder + pointed tip
-- Gallery exports for CAD review (including sectioned gallery)
+### 2) Multi-span threading
+`button screw head diameter 10 shank diameter 5 root diameter 4 length 30 pitch 1 thread height 0.5 thread 3-9 and 14-20 torx`
 
-Threads are not implemented yet.
+Expected:
+- no screw/bolt prompt (explicit screw)
+- no drive prompt (explicit torx)
+- builds with multiple threaded regions
+- matching nut flow appears after generation
 
-## Features
-- Parametric head/drive/shaft inputs
-- Drive recess implemented as a separate cut solid
-- Robust boolean operations for cut/union workflows
-- Preview/export harnesses for:
-  - head-only
-  - drive-only and head+drive
-  - shaft-only and head+shaft
-  - full representative screw gallery + section
+### 3) Bolt + no-drive explicit
+`flat bolt no drive head diameter 10 shank diameter 5 root diameter 4 length 30 pitch 1 thread height 0.5 thread length 18`
+
+Expected:
+- no screw/bolt prompt (explicit bolt)
+- no drive prompt (explicit no drive)
+- flat-ended bolt (no pointed tip)
+- matching nut flow appears
+
+### 4) Typo tolerance
+`flat bold head diameter 10 shank diameter 5 root diameter 4 lenght 30 pitch 1 thread height 0.5 thread length 18`
+
+Expected:
+- `bold` interpreted as `bolt`
+- `lenght` interpreted as `length`
+- generation still succeeds
 
 ## Repository Structure
+
 ```text
 src/screwgen/
-  __init__.py
-  heads.py
-  drives.py
-  shaft.py
   assembly.py
+  cache.py
+  drives.py
   export.py
+  heads.py
+  search_parser.py
+  shaft.py
+  spec.py
+  threads.py
+  webapp.py
   preview/
-    __init__.py
-    preview_heads.py
-    preview_drives.py
-    preview_shafts.py
-    preview_gallery.py
+    ...
+
+web/
+  index.html
+  app.js
+  styles.css
 
 tests/
-  test_heads.py
-  test_drives.py
-  test_shafts.py
-  test_assembly.py
+  test_search_parser.py
+  ...
 ```
-
-Root-level compatibility wrappers are kept for legacy commands (`preview.py`, `preview_drives.py`, `preview_shafts.py`, `preview_screws.py`, and module wrappers like `head.py`).
-
-## Installation
-Assumptions:
-- Python 3.11+
-- A working C++ runtime compatible with CadQuery wheels
-
-### Option A: editable install (recommended)
-```bash
-python -m venv .venv
-. .venv/Scripts/activate
-pip install -e .
-```
-
-### Option B: requirements install
-```bash
-python -m venv .venv
-. .venv/Scripts/activate
-pip install -r requirements.txt
-```
-
-## Usage
-Run preview modules directly:
-
-```bash
-python -m screwgen.preview.preview_heads
-python -m screwgen.preview.preview_drives
-python -m screwgen.preview.preview_shafts
-python -m screwgen.preview.preview_gallery
-```
-
-Legacy wrapper commands remain valid:
-
-```bash
-python preview.py
-python preview_drives.py
-python preview_shafts.py
-python preview_screws.py
-```
-
-### Output Conventions
-Exports are written to `outputs/` with deterministic names, for example:
-- `head_<type>.step`, `head_<type>.stl`
-- `drive_<type>_<size>.step`, `drive_<type>_<size>.stl`
-- `screw_<head>__<drive>__A.step` (representative gallery variants)
-- `screw_gallery.step`, `screw_gallery_section.step`
 
 ## Testing
-Run all tests:
 
+Run the suite:
 ```bash
 pytest
 ```
 
-## Roadmap
-- Thread module (helical thread generation on shaft core)
-- Standards-aligned sizing refinement for head/drive dimensions
-- Automated engineering drawing generation
-- Optional structured inputs / text parsing interface
-
-## Non-goals / Notes
-- No confidential information is stored in this repository.
-- Geometry is not standards-certified yet; values are practical/preview-oriented.
-
-# Parametric Screw Head Generator
-
-Generates parametric screw heads using CadQuery (OpenCASCADE B-Rep kernel).
-
-## Supported Head Types
-
-| Type     | Description                           |
-|----------|---------------------------------------|
-| `flat`   | Countersunk cone (apex at top)        |
-| `pan`    | Cylinder + shallow spherical dome     |
-| `button` | Cylinder + pronounced spherical dome  |
-| `hex`    | Hexagonal prism                       |
-
-## Coordinate Convention
-
-- Head centered on Z axis
-- Underside at Z = 0
-- Head occupies Z in [0, h]
-
-## Usage
-
-```python
-from head import make_head
-
-solid = make_head({"type": "pan", "d": 8, "h": 4})
-```
-
-## Preview Harness
-
+Run just parser tests:
 ```bash
-python preview.py
+pytest tests/test_search_parser.py -q
 ```
 
-Generates individual STEP/STL files and a combined gallery STEP in `outputs/`.
+## Output Location
 
-## Tests
+Generated files are written under:
+- `out/web/`
 
-```bash
-python -m pytest test_head.py -v
-```
+## Current Limitations
 
-## Requirements
-
-- Python 3.11+
-- CadQuery 2.6+
+- Geometry is practical/preview oriented and not standards-certified.
+- Some extreme combinations may trigger boolean fallbacks.
 

@@ -10,6 +10,10 @@ const contextMenuEl = document.getElementById("chat-context-menu");
 const ctxRenameChatBtn = document.getElementById("ctx-rename-chat-btn");
 const ctxDeleteChatBtn = document.getElementById("ctx-delete-chat-btn");
 const composerSendBtn = formEl.querySelector("button[type='submit']");
+const landingEl = document.getElementById("landing");
+const landingFormEl = document.getElementById("landing-form");
+const landingInputEl = document.getElementById("landing-input");
+const landingSendBtn = document.getElementById("landing-send-btn");
 
 let currentChatId = null;
 let pendingQuestion = null;
@@ -17,6 +21,41 @@ let contextChatId = null;
 let contextChatTitle = "";
 let editingMessageIdx = null;
 let editingDraft = "";
+
+function appendOptimisticUserBubble(text) {
+  const node = document.createElement("div");
+  node.className = "bubble user";
+  const content = document.createElement("div");
+  content.textContent = text;
+  node.appendChild(content);
+  messagesEl.appendChild(node);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function setLandingMode(enabled) {
+  if (!landingEl) return;
+  if (enabled && contextMenuEl) {
+    contextMenuEl.hidden = true;
+    contextChatId = null;
+  }
+  landingEl.hidden = !enabled;
+  appEl.classList.toggle("hidden", enabled);
+  if (enabled) {
+    landingInputEl?.focus();
+  } else {
+    inputEl?.focus();
+  }
+}
+
+async function startFromLanding(rawValue) {
+  const content = (rawValue || "").trim();
+  if (!content) return;
+  setLandingMode(false);
+  // Recover from any stale disabled state so landing submit can proceed.
+  if (composerSendBtn.disabled) setWorking(false);
+  inputEl.value = content;
+  await sendMessage(content);
+}
 
 async function sendMessage(rawValue) {
   if (composerSendBtn.disabled) return;
@@ -26,13 +65,15 @@ async function sendMessage(rawValue) {
   const raw = typeof rawValue === "string" ? rawValue : inputEl.value;
   const content = raw.trim();
   if (!content && !pendingQuestion) return;
+  const outbound = pendingQuestion ? raw : content;
   inputEl.value = "";
+  appendOptimisticUserBubble(outbound);
   setWorking(true);
   try {
     const res = await fetch(`/api/chats/${currentChatId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: pendingQuestion ? raw : content }),
+      body: JSON.stringify({ content: outbound }),
     });
     if (!res.ok) {
       const errorBody = await res.json().catch(() => ({ detail: "Request failed." }));
@@ -127,8 +168,10 @@ function bubble(message, idx, latestUserIdx, chat) {
   const asksDriveChoice =
     message.role === "bot" &&
     !!chat.pending_question &&
-    /drive/i.test(chat.pending_question) &&
-    /\b(hex|phillips|torx|no drive)\b/i.test(chat.pending_question);
+    (
+      /what kind of drive is it\??/i.test(chat.pending_question) ||
+      (/drive/i.test(chat.pending_question) && /\b(hex|phillips|torx|no drive)\b/i.test(chat.pending_question))
+    );
   const asksYesNoChoice =
     message.role === "bot" &&
     !!chat.pending_question &&
@@ -141,7 +184,11 @@ function bubble(message, idx, latestUserIdx, chat) {
   const asksRoundHexChoice =
     message.role === "bot" &&
     !!chat.pending_question &&
-    (/style for the matching nut/i.test(chat.pending_question) || /\[hex\/square\]:?\s*$/i.test(chat.pending_question));
+    (
+      /what style for the matching nut\??/i.test(chat.pending_question) ||
+      /style for the matching nut/i.test(chat.pending_question) ||
+      /\[hex\/square\]:?\s*$/i.test(chat.pending_question)
+    );
   if (isLastMessage && asksFastenerChoice && chat.pending_question) {
     const choices = document.createElement("div");
     choices.className = "choice-actions";
@@ -258,6 +305,9 @@ async function saveEdit(idx) {
 function resultCard(message) {
   const card = document.createElement("div");
   card.className = "preview-card";
+  const isNutPreview =
+    typeof message.content === "string" &&
+    /\b(hex|square)\s+nut\s+generated\b/i.test(message.content);
 
   const header = document.createElement("div");
   header.className = "preview-card-header";
@@ -266,6 +316,7 @@ function resultCard(message) {
 
   const preview = document.createElement("div");
   preview.className = "preview-canvas";
+  if (isNutPreview) preview.classList.add("nut-preview");
   card.appendChild(preview);
 
   const actions = document.createElement("div");
@@ -468,8 +519,31 @@ document.addEventListener("click", (e) => {
 });
 
 async function boot() {
+  setWorking(false);
+  if (landingSendBtn) landingSendBtn.disabled = false;
+  setLandingMode(true);
   await loadChats();
 }
 
 boot();
+
+if (landingFormEl) {
+  landingFormEl.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (landingSendBtn.disabled) return;
+    const text = landingInputEl.value;
+    landingInputEl.value = "";
+    landingSendBtn.disabled = true;
+    const previousLabel = landingSendBtn.textContent;
+    landingSendBtn.textContent = "Generating...";
+    try {
+      await startFromLanding(text);
+    } catch (_) {
+      alert("Could not start generation. Please try again.");
+    } finally {
+      landingSendBtn.disabled = false;
+      landingSendBtn.textContent = previousLabel;
+    }
+  });
+}
 

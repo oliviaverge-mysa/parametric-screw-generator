@@ -5,7 +5,6 @@ from __future__ import annotations
 import itertools
 import math
 import re
-import time
 import zipfile
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -13,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -61,6 +60,13 @@ _ROOT = Path(__file__).resolve().parents[2]
 _WEB_DIR = _ROOT / "web"
 _DOWNLOAD_DIR = _ROOT / "out" / "web"
 _DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+_CURSOR_ASSET_DIR = (
+    Path.home()
+    / ".cursor"
+    / "projects"
+    / "c-Users-hardware-parametric-screw-generator"
+    / "assets"
+)
 
 app = FastAPI(title="Fastener Generator Chat")
 app.mount("/assets", StaticFiles(directory=_WEB_DIR), name="assets")
@@ -70,6 +76,56 @@ _chat_counter = itertools.count(1)
 _chats: dict[int, ChatState] = {}
 _Q_MATCH_NUT = "Do you want a matching nut?"
 _Q_MATCH_NUT_STYLE = "What style for the matching nut?"
+_Q_NUT_SHAPE = "What shape for the nut?"
+
+# Metric hex nut defaults (coarse series), keyed by thread major diameter (mm):
+# value = (across flats S, thickness M)
+_HEX_NUT_SIZE_CHART: dict[float, tuple[float, float]] = {
+    2.0: (4.0, 1.6),
+    2.5: (5.0, 2.0),
+    3.0: (5.5, 2.4),
+    4.0: (7.0, 3.2),
+    5.0: (8.0, 4.0),
+    6.0: (10.0, 5.0),
+    8.0: (13.0, 6.5),
+    10.0: (17.0, 8.0),
+    12.0: (19.0, 10.0),
+    14.0: (22.0, 11.0),
+    16.0: (24.0, 13.0),
+    18.0: (27.0, 15.0),
+    20.0: (30.0, 16.0),
+    22.0: (32.0, 18.0),
+    24.0: (36.0, 19.0),
+    27.0: (41.0, 22.0),
+    30.0: (46.0, 24.0),
+    33.0: (50.0, 26.0),
+    36.0: (55.0, 29.0),
+    39.0: (60.0, 31.0),
+    42.0: (65.0, 34.0),
+    48.0: (75.0, 38.0),
+}
+
+
+def _slug(v: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]+", "_", v).strip("_").lower()
+
+
+def _unique_output_stem(base: str) -> str:
+    base = _slug(base)
+    candidate = base
+    i = 2
+    while True:
+        conflicts = [
+            _DOWNLOAD_DIR / f"{candidate}.step",
+            _DOWNLOAD_DIR / f"{candidate}.stl",
+            _DOWNLOAD_DIR / f"{candidate}.svg",
+            _DOWNLOAD_DIR / f"{candidate}_drawing.pdf",
+            _DOWNLOAD_DIR / f"{candidate}_bundle.zip",
+        ]
+        if not any(p.exists() for p in conflicts):
+            return candidate
+        candidate = f"{base}_{i}"
+        i += 1
 
 
 def _new_chat(title: str | None = None) -> ChatState:
@@ -663,6 +719,34 @@ def _write_nut_drawing_pdf(
     c = canvas.Canvas(str(output_path), pagesize=(page_w, page_h))
     c.setTitle(f"Matching {style_name} Nut Drawing")
 
+    def _dim_h_arrow(x1: float, x2: float, y: float, ext_y1: float, ext_y2: float, label: str) -> None:
+        c.setLineWidth(1)
+        c.line(x1, ext_y1, x1, y)
+        c.line(x2, ext_y2, x2, y)
+        c.line(x1, y, x2, y)
+        ah = 6.0
+        aw = 2.6
+        c.line(x1, y, x1 + ah, y + aw)
+        c.line(x1, y, x1 + ah, y - aw)
+        c.line(x2, y, x2 - ah, y + aw)
+        c.line(x2, y, x2 - ah, y - aw)
+        c.setFont("Helvetica", 9)
+        c.drawString((x1 + x2) / 2 - 20, y + 4, label)
+
+    def _dim_v_arrow(x: float, y1: float, y2: float, ext_x1: float, ext_x2: float, label: str) -> None:
+        c.setLineWidth(1)
+        c.line(ext_x1, y1, x, y1)
+        c.line(ext_x2, y2, x, y2)
+        c.line(x, y1, x, y2)
+        ah = 6.0
+        aw = 2.6
+        c.line(x, y1, x - aw, y1 + ah)
+        c.line(x, y1, x + aw, y1 + ah)
+        c.line(x, y2, x - aw, y2 - ah)
+        c.line(x, y2, x + aw, y2 - ah)
+        c.setFont("Helvetica", 9)
+        c.drawString(x + 8, (y1 + y2) / 2 - 3, label)
+
     margin = 18
     ix, iy = margin, margin
     iw, ih = page_w - 2 * margin, page_h - 2 * margin
@@ -673,12 +757,15 @@ def _write_nut_drawing_pdf(
     c.setFont("Helvetica", 9)
     c.drawString(ix + 16, iy + ih - 38, f"Part: Matching {style_name} Nut")
 
-    # Top view
-    top_cx, top_cy = ix + 170, iy + ih * 0.58
-    top_r = 52
+    # Larger top/side views aligned on one centerline to use page better.
+    view_cy = iy + ih * 0.59
+    top_cx, top_cy = ix + 190, view_cy
+    top_r = 82
+    view_label_y = view_cy + top_r + 38
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(top_cx - 24, top_cy + top_r + 20, "TOP VIEW")
+    c.drawString(top_cx - 24, view_label_y, "TOP VIEW")
     c.setLineWidth(1.2)
+    style_l = style_name.lower()
     if style_name.lower().startswith("hex"):
         pts = []
         for k in range(6):
@@ -689,36 +776,465 @@ def _write_nut_drawing_pdf(
             x2, y2 = pts[(i + 1) % 6]
             c.line(x1, y1, x2, y2)
     else:
-        s = top_r * 1.5
+        s = top_r * 1.45
         c.rect(top_cx - s / 2, top_cy - s / 2, s, s, stroke=1, fill=0)
-    c.circle(top_cx, top_cy, max(6.0, major_d * 4.0), stroke=1, fill=0)
-
-    # Side view
-    sx, sy = ix + 320, iy + ih * 0.48
-    side_w = 170
-    side_h = 90
-    c.setFont("Helvetica-Bold", 9)
-    c.drawString(sx + 42, sy + side_h / 2 + 36, "SIDE VIEW")
-    c.setLineWidth(1.2)
-    c.rect(sx, sy - side_h / 2, side_w, side_h, stroke=1, fill=0)
+    bore_r = max(14.0, major_d * 5.2)
+    c.circle(top_cx, top_cy, bore_r, stroke=1, fill=0)
     c.setDash([2, 2], 0)
-    bore_half = max(8.0, major_d * 3.2)
-    c.line(sx + side_w * 0.25, sy - bore_half, sx + side_w * 0.25, sy + bore_half)
-    c.line(sx + side_w * 0.75, sy - bore_half, sx + side_w * 0.75, sy + bore_half)
+    c.line(top_cx - top_r * 1.1, top_cy, top_cx + top_r * 1.1, top_cy)
+    c.line(top_cx, top_cy - top_r * 1.1, top_cx, top_cy + top_r * 1.1)
     c.setDash([], 0)
 
-    # Dimension notes
+    # Side view (aligned with top view centerline), with chamfered profile.
+    sx, sy = ix + 470, view_cy
+    side_w = 265
+    side_h = 122
+    # Light chamfer profile in drawing (not heavy truncation).
+    ch = max(5.0, min(10.0, 0.06 * side_h))
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(sx + 42, view_label_y, "SIDE VIEW")
+    c.setLineWidth(1.2)
+    x0 = sx
+    x1 = sx + side_w
+    y0 = sy - side_h / 2
+    y1 = sy + side_h / 2
+    pts_side = [
+        (x0 + ch, y1),
+        (x1 - ch, y1),
+        (x1, y1 - ch),
+        (x1, y0 + ch),
+        (x1 - ch, y0),
+        (x0 + ch, y0),
+        (x0, y0 + ch),
+        (x0, y1 - ch),
+    ]
+    for i in range(len(pts_side)):
+        xa, ya = pts_side[i]
+        xb, yb = pts_side[(i + 1) % len(pts_side)]
+        c.line(xa, ya, xb, yb)
+    c.setDash([2, 2], 0)
+    bore_half = max(16.0, major_d * 4.2)
+    c.line(sx + side_w * 0.37, sy - bore_half, sx + side_w * 0.37, sy + bore_half)
+    c.line(sx + side_w * 0.63, sy - bore_half, sx + side_w * 0.63, sy + bore_half)
+    c.setDash([], 0)
+
+    # Dimensions near views (style like main drawing)
     c.setFont("Helvetica", 9)
-    c.drawString(ix + 16, iy + 82, f"Across Flats / Width: {across:.2f} mm")
-    c.drawString(ix + 16, iy + 66, f"Thickness: {nut_h:.2f} mm")
-    c.drawString(ix + 16, iy + 50, f"Thread Major Dia: {major_d:.2f} mm")
-    c.drawString(ix + 16, iy + 34, f"Pitch: {pitch:.3f} mm")
+    corner_d = across / 0.8660254 if style_l.startswith("hex") else across * (2.0**0.5)
+    c.drawString(ix + 16, iy + 90, f"Across Flats / Width (S): {across:.2f} mm")
+    c.drawString(ix + 16, iy + 74, f"Corner-to-Corner (E): {corner_d:.2f} mm")
+    c.drawString(ix + 16, iy + 58, f"Nut Thickness (M): {nut_h:.2f} mm")
+    c.drawString(ix + 16, iy + 42, f"Thread Major Dia (D): {major_d:.2f} mm")
+    c.drawString(ix + 16, iy + 26, f"Pitch (P): {pitch:.3f} mm")
+
+    # Dimension lines with arrowheads.
+    c.setLineWidth(1)
+    _dim_h_arrow(top_cx - top_r, top_cx + top_r, top_cy + top_r + 22, top_cy + top_r + 6, top_cy + top_r + 6, f"S={across:.2f}")
+    _dim_v_arrow(top_cx + top_r + 20, top_cy - bore_r, top_cy + bore_r, top_cx + top_r + 6, top_cx + top_r + 6, f"D={major_d:.2f}")
+    _dim_v_arrow(x1 + 28, y0, y1, x1 + 8, x1 + 8, f"M={nut_h:.2f}")
+
+    # MYSA title block in bottom-right (same family as fastener drawing).
+    tb_w = 285
+    tb_h = 108
+    tb_x = ix + iw - tb_w - 8
+    tb_y = iy + 6
+    c.rect(tb_x, tb_y, tb_w, tb_h, stroke=1, fill=0)
+    y_hdr = tb_y + tb_h - 20
+    y_part = y_hdr - 22
+    c.line(tb_x, y_hdr, tb_x + tb_w, y_hdr)
+    c.line(tb_x, y_part, tb_x + tb_w, y_part)
+    grid_h = y_part - tb_y
+    mid_y = tb_y + grid_h / 2
+    col1 = tb_x + tb_w / 3
+    col2 = tb_x + 2 * tb_w / 3
+    c.line(col1, tb_y, col1, y_part)
+    c.line(col2, tb_y, col2, y_part)
+    c.line(tb_x, mid_y, tb_x + tb_w, mid_y)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(tb_x + 8, tb_y + tb_h - 14, "MYSA")
+    c.setFont("Helvetica", 8.2)
+    c.drawString(tb_x + 8, y_part + 8, "PART NAME")
+    c.setFont("Helvetica", 7.8)
+    c.drawString(tb_x + 66, y_part + 8, f"Matching {style_name} Nut"[:42])
+
+    pad = 8
+    row_h = (y_part - tb_y) / 2
+    top_row_top = y_part
+    bot_row_top = tb_y + row_h
+    label_drop = 12
+    value_drop = 25
+
+    def _cell(col_left: float, row_top: float, label: str, value: str) -> None:
+        c.setFont("Helvetica", 7.6)
+        c.drawString(col_left + pad, row_top - label_drop, label)
+        c.setFont("Helvetica", 8.0)
+        c.drawString(col_left + pad, row_top - value_drop, value)
+
+    _cell(tb_x, top_row_top, "DRAWN BY", Path.home().name[:20])
+    _cell(col1, top_row_top, "APPROVED BY", "Mysa")
+    _cell(col2, top_row_top, "DATE", datetime.now().strftime("%Y-%m-%d"))
+    _cell(tb_x, bot_row_top, "UNITS", "mm")
+    _cell(col1, bot_row_top, "TYPE", style_name)
+    _cell(col2, bot_row_top, "SCALE", "NTS")
 
     c.save()
 
 
 def _is_yes(answer: str) -> bool:
     return answer.strip().lower() in {"y", "yes"}
+
+
+def _find_labeled_float(text: str, labels: list[str]) -> float | None:
+    label_pat = "|".join(re.escape(l) for l in labels)
+    m = re.search(rf"(?:{label_pat})\s*(?:=|:|is|of)?\s*(-?\d+(?:\.\d+)?)", text)
+    if m:
+        return float(m.group(1))
+    m2 = re.search(rf"(-?\d+(?:\.\d+)?)\s*(?:mm)?\s*(?:{label_pat})", text)
+    if m2:
+        return float(m2.group(1))
+    return None
+
+
+def _is_standalone_nut_query(text: str) -> bool:
+    t = text.lower()
+    return ("nut" in t) and ("screw" not in t) and ("bolt" not in t)
+
+
+def _nut_default_dims(style: str, major_d: float) -> tuple[float, float]:
+    style_l = style.strip().lower()
+    if style_l.startswith("hex"):
+        best_key = min(_HEX_NUT_SIZE_CHART.keys(), key=lambda d: abs(d - major_d))
+        return _HEX_NUT_SIZE_CHART[best_key]
+    # Square nut practical defaults when no explicit chart value is supplied.
+    return (1.50 * major_d, 0.80 * major_d)
+
+
+def _parse_nut_inputs(text: str, prompt) -> tuple[str, float, float, float]:
+    t = text.lower()
+    style = "hex" if "hex" in t else ("square" if "square" in t else None)
+    major_d = _find_labeled_float(t, ["thread diameter", "major diameter", "diameter", "dia"])
+    pitch = _find_labeled_float(t, ["pitch"])
+    nut_h = _find_labeled_float(t, ["height", "thickness", "nut height"])
+
+    if style is None:
+        s = prompt(_Q_NUT_SHAPE).strip().lower()
+        style = "hex" if "hex" in s else ("square" if "square" in s else None)
+    if style is None:
+        raise ValueError("Nut shape must be hex or square.")
+    if major_d is None:
+        major_d = float(prompt("Missing nut thread diameter. Enter a value: ").strip())
+    if pitch is None:
+        # ISO coarse-like approximation when pitch isn't specified.
+        pitch = max(0.35, min(3.0, 0.20 * major_d))
+    if nut_h is None:
+        _, nut_h = _nut_default_dims(style, major_d)
+    return style, major_d, pitch, nut_h
+
+
+def _build_nut_from_params(
+    chat: ChatState,
+    *,
+    style: str,
+    major_d: float,
+    pitch: float,
+    nut_h: float,
+    minor_d: float,
+    message_prefix: str,
+) -> dict[str, Any]:
+    try:
+        import cadquery as cq
+        from cadquery import exporters
+
+        from .threads import ThreadParams, apply_external_thread
+    except ModuleNotFoundError as exc:
+        chat.pending_question = None
+        return {
+            "status": "error",
+            "error": str(exc),
+            "message": _bot(
+                chat,
+                "CAD runtime is missing (CadQuery/OCP). Install a compatible runtime to generate geometry.",
+                kind="error",
+            ),
+        }
+
+    style_l = style.strip().lower()
+    default_across, default_h = _nut_default_dims(style_l, major_d)
+    if nut_h <= 0:
+        nut_h = default_h
+    if style_l.startswith("hex"):
+        af = default_across
+        poly_d = 2.0 * af / (3.0**0.5)
+        body = cq.Workplane("XY").polygon(6, poly_d).extrude(nut_h)
+        across = af
+        style_name = "Hex"
+    else:
+        w = default_across
+        body = cq.Workplane("XY").rect(w, w).extrude(nut_h)
+        across = w
+        style_name = "Square"
+
+    body = body.translate((0, 0, -nut_h / 2.0))
+
+    def _is_valid_wp(shape_wp: Any) -> bool:
+        try:
+            if shape_wp is None:
+                return False
+            if shape_wp.solids().size() <= 0:
+                return False
+            return float(shape_wp.val().Volume()) > 1.0e-1
+        except Exception:
+            return False
+
+    tap_len = nut_h + 2.0
+    tap_spec = ShaftSpec(d_minor=minor_d, L=tap_len, tip_len=0.0)
+    tap_core = cq.Workplane("XY").circle(minor_d / 2.0).extrude(tap_len)
+    try:
+        tap = apply_external_thread(
+            tap_core,
+            tap_spec,
+            ThreadParams(
+                pitch=pitch,
+                length=tap_len,
+                start_from_head=0.0,
+                included_angle_deg=60.0,
+                major_d=max(minor_d + 0.05, major_d - 0.04),
+                thread_height=None,
+                mode="add",
+            ),
+        )
+        tap = tap.translate((0, 0, -nut_h / 2.0 - 1.0))
+        nut = body.cut(tap)
+        if not _is_valid_wp(nut):
+            raise RuntimeError("Primary threaded cut produced invalid nut.")
+    except Exception:
+        # Retry with a slightly reduced thread major diameter before giving up.
+        try:
+            tap_retry = apply_external_thread(
+                tap_core,
+                tap_spec,
+                ThreadParams(
+                    pitch=pitch,
+                    length=tap_len,
+                    start_from_head=0.0,
+                    included_angle_deg=60.0,
+                    major_d=max(minor_d + 0.03, major_d - 0.12),
+                    thread_height=None,
+                    mode="add",
+                ),
+            )
+            tap_retry = tap_retry.translate((0, 0, -nut_h / 2.0 - 1.0))
+            nut = body.cut(tap_retry)
+            if not _is_valid_wp(nut):
+                raise RuntimeError("Retry threaded cut produced invalid nut.")
+        except Exception:
+            bore_r = major_d / 2.0 + 0.08
+            bore = cq.Workplane("XY").circle(bore_r).extrude(nut_h + 2.0).translate((0, 0, -nut_h / 2.0 - 1.0))
+            nut = body.cut(bore)
+
+    # Keep the latest known-good nut so later style operations can't erase threads.
+    base_nut = nut if _is_valid_wp(nut) else body.cut(
+        cq.Workplane("XY").circle(max(major_d / 2.0 + 0.08, minor_d / 2.0 + 0.05)).extrude(nut_h + 2.0).translate((0, 0, -nut_h / 2.0 - 1.0))
+    )
+
+    # Vertex-only exterior shave:
+    # apply a single planar cut per corner (top and bottom) so each corner is
+    # "sliced" flat; removed chunk is effectively a pyramid-like corner piece.
+    if style_l.startswith("hex") or style_l.startswith("square"):
+        try:
+            z_box = nut.val().BoundingBox()
+            z_top = float(z_box.zmax)
+            z_bot = float(z_box.zmin)
+            is_hex = style_l.startswith("hex")
+            corner_count = 6 if is_hex else 4
+            outer_r = float(across) / (3.0**0.5) if is_hex else float(across) / (2.0**0.5)
+            corner_phase = 0.0 if is_hex else math.radians(45.0)
+            edge_run = max(0.50, min(1.95, 0.15 * float(across)))
+            shave_drop = max(0.28, min(0.92, 0.078 * float(across)))
+
+            def _vsub(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+                return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+            def _vadd(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+                return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
+
+            def _vscale(a: tuple[float, float, float], s: float) -> tuple[float, float, float]:
+                return (a[0] * s, a[1] * s, a[2] * s)
+
+            def _vdot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+                return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+            def _vcross(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+                return (
+                    a[1] * b[2] - a[2] * b[1],
+                    a[2] * b[0] - a[0] * b[2],
+                    a[0] * b[1] - a[1] * b[0],
+                )
+
+            def _vnorm(a: tuple[float, float, float]) -> float:
+                return max(1.0e-12, (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) ** 0.5)
+
+            def _vunit(a: tuple[float, float, float]) -> tuple[float, float, float]:
+                n = _vnorm(a)
+                return (a[0] / n, a[1] / n, a[2] / n)
+
+            def _plane_cut(
+                shp: Any,
+                corner_pt: tuple[float, float, float],
+                p1: tuple[float, float, float],
+                p2: tuple[float, float, float],
+                p3: tuple[float, float, float],
+            ) -> Any:
+                v1 = _vsub(p2, p1)
+                v2 = _vsub(p3, p1)
+                n = _vcross(v1, v2)
+                if _vnorm(n) <= 1.0e-10:
+                    return shp
+                n = _vunit(n)
+                u = _vunit(v1)
+
+                center = _vscale(_vadd(_vadd(p1, p2), p3), 1.0 / 3.0)
+                # Orient plane normal toward corner side so the cut removes the corner.
+                if _vdot(n, _vsub(corner_pt, center)) < 0.0:
+                    n = _vscale(n, -1.0)
+                # Ensure xDir is not parallel to normal.
+                if _vnorm(_vcross(u, n)) <= 1.0e-9:
+                    u = (1.0, 0.0, 0.0) if abs(n[0]) < 0.9 else (0.0, 1.0, 0.0)
+
+                plane = cq.Plane(origin=center, xDir=u, normal=n)
+                tool = (
+                    cq.Workplane(plane)
+                    .rect(4.0 * float(across), 4.0 * float(across))
+                    .extrude(max(3.0 * float(across), 3.0 * float(nut_h)))
+                )
+                return shp.cut(tool)
+
+            cand = nut
+            step = 360.0 / float(corner_count)
+            for i in range(corner_count):
+                a = corner_phase + math.radians(step * i)
+                c_xy = (outer_r * math.cos(a), outer_r * math.sin(a))
+                prev_xy = (outer_r * math.cos(a - math.radians(step)), outer_r * math.sin(a - math.radians(step)))
+                next_xy = (outer_r * math.cos(a + math.radians(step)), outer_r * math.sin(a + math.radians(step)))
+
+                d1 = _vunit((prev_xy[0] - c_xy[0], prev_xy[1] - c_xy[1], 0.0))
+                d2 = _vunit((next_xy[0] - c_xy[0], next_xy[1] - c_xy[1], 0.0))
+
+                # Top corner plane points.
+                c_top = (c_xy[0], c_xy[1], z_top)
+                p1_top = (c_xy[0] + edge_run * d1[0], c_xy[1] + edge_run * d1[1], z_top)
+                p2_top = (c_xy[0] + edge_run * d2[0], c_xy[1] + edge_run * d2[1], z_top)
+                p3_top = (c_xy[0], c_xy[1], z_top - shave_drop)
+
+                # Bottom corner plane points.
+                c_bot = (c_xy[0], c_xy[1], z_bot)
+                p1_bot = (c_xy[0] + edge_run * d1[0], c_xy[1] + edge_run * d1[1], z_bot)
+                p2_bot = (c_xy[0] + edge_run * d2[0], c_xy[1] + edge_run * d2[1], z_bot)
+                p3_bot = (c_xy[0], c_xy[1], z_bot + shave_drop)
+
+                cand = _plane_cut(cand, c_top, p1_top, p2_top, p3_top)
+                cand = _plane_cut(cand, c_bot, p1_bot, p2_bot, p3_bot)
+
+            if _is_valid_wp(cand):
+                nut = cand
+        except Exception:
+            pass
+
+    if not _is_valid_wp(nut):
+        nut = base_nut
+
+    # Guardrail: never export an empty/invalid nut shape.
+    if not _is_valid_wp(nut):
+        try:
+            if style_l.startswith("hex"):
+                poly_d_fb = 2.0 * across / (3.0**0.5)
+                fallback_body = cq.Workplane("XY").polygon(6, poly_d_fb).extrude(nut_h)
+            else:
+                fallback_body = cq.Workplane("XY").rect(across, across).extrude(nut_h)
+            fallback_body = fallback_body.translate((0, 0, -nut_h / 2.0))
+            fallback_bore = (
+                cq.Workplane("XY")
+                .circle(max(major_d / 2.0 + 0.08, minor_d / 2.0 + 0.05))
+                .extrude(nut_h + 2.0)
+                .translate((0, 0, -nut_h / 2.0 - 1.0))
+            )
+            nut = fallback_body.cut(fallback_bore)
+        except Exception:
+            pass
+
+    if not _is_valid_wp(nut):
+        chat.pending_question = None
+        return {
+            "status": "error",
+            "error": "Failed to generate a valid nut solid.",
+            "message": _bot(
+                chat,
+                "I couldn't build a valid nut geometry from that request. Please try again with slightly larger nut dimensions.",
+                kind="error",
+            ),
+        }
+
+    stem = _unique_output_stem(f"nut_{style_name.lower()}_d{major_d:.2f}_p{pitch:.2f}")
+    step_path = _DOWNLOAD_DIR / f"{stem}.step"
+    stl_path = _DOWNLOAD_DIR / f"{stem}.stl"
+    preview_path = _DOWNLOAD_DIR / f"{stem}.svg"
+    drawing_path = _DOWNLOAD_DIR / f"{stem}_drawing.pdf"
+    bundle_path = _DOWNLOAD_DIR / f"{stem}_bundle.zip"
+
+    from .export import export_step, export_stl
+
+    export_step(nut, step_path)
+    export_stl(nut, stl_path)
+    try:
+        exporters.export(
+            nut,
+            str(preview_path),
+            exportType="SVG",
+            opt={"projectionDir": (0.7, -0.5, 0.7), "showAxes": False, "showHidden": False},
+        )
+        preview_url = f"/downloads/{preview_path.name}"
+    except Exception:
+        preview_url = ""
+
+    drawing_url = ""
+    try:
+        _write_nut_drawing_pdf(
+            style_name=style_name,
+            across=float(across),
+            major_d=major_d,
+            pitch=pitch,
+            nut_h=nut_h,
+            output_path=drawing_path,
+        )
+        drawing_url = f"/downloads/{drawing_path.name}"
+    except Exception:
+        drawing_url = ""
+
+    try:
+        with zipfile.ZipFile(bundle_path, mode="w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            bundle.write(step_path, arcname=step_path.name)
+            bundle.write(stl_path, arcname=stl_path.name)
+            if drawing_url:
+                bundle.write(drawing_path, arcname=drawing_path.name)
+        bundle_url = f"/downloads/{bundle_path.name}"
+    except Exception:
+        bundle_url = ""
+
+    chat.latest_files = {
+        "step_url": f"/downloads/{step_path.name}",
+        "stl_url": f"/downloads/{stl_path.name}",
+        "preview_url": preview_url,
+        "drawing_url": drawing_url,
+        "bundle_url": bundle_url,
+    }
+    prefix = (message_prefix.strip() + " ") if message_prefix.strip() else ""
+    msg = _bot(
+        chat,
+        f"{prefix}{style_name} nut generated. Use the buttons to download STEP, STL, drawing PDF, or a ZIP bundle.",
+        kind="result",
+        extra=chat.latest_files,
+    )
+    return {"status": "ok", "message": msg}
 
 
 def _build_matching_nut(chat: ChatState, base: ScrewSpec, nut_style: str) -> dict[str, Any]:
@@ -749,110 +1265,16 @@ def _build_matching_nut(chat: ChatState, base: ScrewSpec, nut_style: str) -> dic
 
     major_d = float(first_tr.major_d if first_tr.major_d is not None else base.shaft.d_minor * 1.15)
     pitch = float(first_tr.pitch)
-    thread_height = first_tr.thread_height
-    nut_h = max(0.7 * major_d, min(1.0 * major_d, 0.85 * major_d))
-    style = nut_style.strip().lower()
-
-    if style.startswith("hex"):
-        af = max(1.6 * major_d, base.head.d)
-        # polygon(d) uses vertex-to-vertex diameter for regular polygons.
-        poly_d = 2.0 * af / (3.0**0.5)
-        body = cq.Workplane("XY").polygon(6, poly_d).extrude(nut_h)
-        style_name = "Hex"
-    else:
-        w = max(1.45 * major_d, 0.9 * base.head.d)
-        body = cq.Workplane("XY").rect(w, w).extrude(nut_h)
-        style_name = "Square"
-
-    body = body.translate((0, 0, -nut_h / 2.0))
-
-    # Build a threaded male "tap" and subtract it to get a matching internal thread.
-    tap_len = nut_h + 2.0
-    tap_spec = ShaftSpec(d_minor=base.shaft.d_minor, L=tap_len, tip_len=0.0)
-    tap_core = cq.Workplane("XY").circle(base.shaft.d_minor / 2.0).extrude(tap_len).translate((0, 0, -nut_h / 2.0 - 1.0))
-    try:
-        tap = apply_external_thread(
-            tap_core,
-            tap_spec,
-            ThreadParams(
-                pitch=pitch,
-                length=nut_h,
-                start_from_head=1.0,
-                included_angle_deg=60.0,
-                major_d=major_d,
-                thread_height=thread_height,
-                mode="add",
-            ),
-        )
-        nut = body.cut(tap)
-    except Exception:
-        # Fallback to a simple clearance bore if helical subtraction is unstable.
-        bore_r = major_d / 2.0 + 0.08
-        bore = cq.Workplane("XY").circle(bore_r).extrude(nut_h + 2.0).translate((0, 0, -nut_h / 2.0 - 1.0))
-        nut = body.cut(bore)
-
-    stamp = int(time.time() * 1000)
-    stem = f"matching_nut_{style_name.lower()}_d{major_d:.2f}_p{pitch:.2f}_{stamp}"
-    stem = re.sub(r"[^a-zA-Z0-9_-]+", "_", stem).strip("_").lower()
-    step_path = _DOWNLOAD_DIR / f"{stem}.step"
-    stl_path = _DOWNLOAD_DIR / f"{stem}.stl"
-    preview_path = _DOWNLOAD_DIR / f"{stem}.svg"
-    drawing_path = _DOWNLOAD_DIR / f"{stem}_drawing.pdf"
-    bundle_path = _DOWNLOAD_DIR / f"{stem}_bundle.zip"
-
-    from .export import export_step, export_stl
-
-    export_step(nut, step_path)
-    export_stl(nut, stl_path)
-    try:
-        exporters.export(
-            nut,
-            str(preview_path),
-            exportType="SVG",
-            opt={"projectionDir": (0.7, -0.5, 0.7), "showAxes": False, "showHidden": False},
-        )
-        preview_url = f"/downloads/{preview_path.name}"
-    except Exception:
-        preview_url = ""
-
-    drawing_url = ""
-    try:
-        across = af if style.startswith("hex") else w
-        _write_nut_drawing_pdf(
-            style_name=style_name,
-            across=float(across),
-            major_d=major_d,
-            pitch=pitch,
-            nut_h=nut_h,
-            output_path=drawing_path,
-        )
-        drawing_url = f"/downloads/{drawing_path.name}"
-    except Exception:
-        drawing_url = ""
-    try:
-        with zipfile.ZipFile(bundle_path, mode="w", compression=zipfile.ZIP_DEFLATED) as bundle:
-            bundle.write(step_path, arcname=step_path.name)
-            bundle.write(stl_path, arcname=stl_path.name)
-            if drawing_url:
-                bundle.write(drawing_path, arcname=drawing_path.name)
-        bundle_url = f"/downloads/{bundle_path.name}"
-    except Exception:
-        bundle_url = ""
-
-    chat.latest_files = {
-        "step_url": f"/downloads/{step_path.name}",
-        "stl_url": f"/downloads/{stl_path.name}",
-        "preview_url": preview_url,
-        "drawing_url": drawing_url,
-        "bundle_url": bundle_url,
-    }
-    msg = _bot(
+    _, nut_h = _nut_default_dims(nut_style, major_d)
+    return _build_nut_from_params(
         chat,
-        f"Matching {style_name.lower()} nut generated. Use the buttons to download STEP, STL, drawing PDF, or a ZIP bundle.",
-        kind="result",
-        extra=chat.latest_files,
+        style=nut_style,
+        major_d=major_d,
+        pitch=pitch,
+        nut_h=nut_h,
+        minor_d=base.shaft.d_minor,
+        message_prefix="Matching",
     )
-    return {"status": "ok", "message": msg}
 
 
 def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
@@ -874,14 +1296,12 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
 
     chat.pending_question = None
     chat.title = _chat_title_for_spec(spec)
-    stamp = int(time.time() * 1000)
-    head_tag = f"{spec.fastener_type}_{spec.head.type}_hd{spec.head.d:.2f}_L{spec.shaft.L:.2f}"
-    if spec.drive is not None:
-        head_tag += f"_{spec.drive.type}"
-    if any(isinstance(r, ThreadRegionSpec) for r in spec.regions):
-        head_tag += "_threaded"
-    slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", head_tag).strip("_").lower()
-    stem = f"{slug}_{stamp}"
+    drive_tag = spec.drive.type if spec.drive is not None else "nodrive"
+    threaded = any(isinstance(r, ThreadRegionSpec) for r in spec.regions)
+    th_tag = "th" if threaded else "sm"
+    stem = _unique_output_stem(
+        f"{spec.fastener_type}_{spec.head.type}_{drive_tag}_d{spec.shaft.d_minor:.2f}_l{spec.shaft.L:.2f}_{th_tag}"
+    )
     screw = make_screw_from_spec(spec, include_thread_markers=False)
     step_path = export_step(screw, _DOWNLOAD_DIR / f"{stem}.step")
     stl_path = export_stl(screw, _DOWNLOAD_DIR / f"{stem}.stl")
@@ -966,6 +1386,38 @@ def _attempt_build(chat: ChatState) -> dict[str, Any]:
             return chat.answers[q]
         raise _NeedInput(q)
 
+    if _is_standalone_nut_query(chat.query):
+        try:
+            style, major_d, pitch, nut_h = _parse_nut_inputs(chat.query, _prompt)
+            # Approximate minor diameter for standalone nut threading from pitch.
+            minor_d = max(0.2 * major_d, major_d - 1.2 * pitch)
+            chat.latest_spec = None
+            chat.pending_question = None
+            chat.title = f"{style.title()} Nut"
+            return _build_nut_from_params(
+                chat,
+                style=style,
+                major_d=major_d,
+                pitch=pitch,
+                nut_h=nut_h,
+                minor_d=minor_d,
+                message_prefix="",
+            )
+        except _NeedInput as need:
+            chat.pending_question = need.question
+            return {
+                "status": "needs_input",
+                "question": need.question,
+                "message": _bot(chat, need.question, kind="question"),
+            }
+        except Exception as exc:
+            chat.pending_question = None
+            return {
+                "status": "error",
+                "error": str(exc),
+                "message": _bot(chat, f"Could not generate nut: {exc}", kind="error"),
+            }
+
     try:
         spec = screw_spec_from_query(chat.query, prompt=_prompt)
     except _NeedInput as need:
@@ -992,6 +1444,15 @@ def index() -> HTMLResponse:
     if not index_path.exists():
         raise HTTPException(status_code=404, detail="Frontend not found.")
     return HTMLResponse(index_path.read_text(encoding="utf-8"))
+
+
+@app.get("/brand-bg")
+def brand_bg() -> FileResponse:
+    if _CURSOR_ASSET_DIR.exists():
+        matches = sorted(_CURSOR_ASSET_DIR.glob("**/mysa_fastener_laydown*.png"))
+        if matches:
+            return FileResponse(matches[-1])
+    raise HTTPException(status_code=404, detail="Brand background not found.")
 
 
 @app.get("/api/chats", response_model=list[ChatSummary])

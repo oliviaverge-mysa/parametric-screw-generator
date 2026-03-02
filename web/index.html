@@ -7,10 +7,31 @@
   <link rel="stylesheet" href="/assets/styles.css" />
 </head>
 <body>
+  <section id="landing" class="landing">
+    <div class="landing-overlay"></div>
+    <div class="landing-content">
+      <div class="landing-brand">mysa</div>
+      <h2>Fastener Generator</h2>
+      <p>Design parametric screws, bolts, and matching nuts in one flow.</p>
+      <form id="landing-form" class="landing-search">
+        <input id="landing-input" type="text" placeholder="Describe the fastener you want..." autocomplete="off" />
+        <button id="landing-send-btn" type="submit">Generate</button>
+      </form>
+    </div>
+  </section>
   <div class="app">
     <aside class="sidebar">
       <div class="sidebar-top">
+        <div class="brand-lockup" aria-label="Mysa brand">
+          <div class="brand-icon" aria-hidden="true">
+            <span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span>
+          </div>
+          <div class="brand-wordmark">mysa</div>
+        </div>
         <h1>Fastener Generator</h1>
+        <p class="brand-subtitle">Parametric screws, bolts, and matching nuts.</p>
         <div class="sidebar-actions">
           <button id="new-chat-btn">+ New Chat</button>
           <button id="delete-chat-btn" class="danger-btn" type="button">Delete Current</button>
