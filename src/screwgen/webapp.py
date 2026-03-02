@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .search_parser import screw_spec_from_query
-from .spec import ThreadRegionSpec
+from .spec import ScrewSpec, ShaftSpec, ThreadRegionSpec
 
 
 class _NeedInput(Exception):
@@ -36,6 +36,8 @@ class ChatState:
     answers: dict[str, str] = field(default_factory=dict)
     pending_question: str | None = None
     latest_files: dict[str, str] = field(default_factory=dict)
+    pending_flow: str | None = None
+    latest_spec: ScrewSpec | None = None
 
 
 class MessageIn(BaseModel):
@@ -66,6 +68,8 @@ app.mount("/downloads", StaticFiles(directory=_DOWNLOAD_DIR), name="downloads")
 
 _chat_counter = itertools.count(1)
 _chats: dict[int, ChatState] = {}
+_Q_MATCH_NUT = "Do you want a matching nut?"
+_Q_MATCH_NUT_STYLE = "What style for the matching nut?"
 
 
 def _new_chat(title: str | None = None) -> ChatState:
@@ -643,29 +647,215 @@ def _write_engineering_drawing_pdf(
     c.save()
 
 
-def _attempt_build(chat: ChatState) -> dict[str, Any]:
-    def _prompt(q: str) -> str:
-        if q in chat.answers:
-            return chat.answers[q]
-        raise _NeedInput(q)
+def _write_nut_drawing_pdf(
+    *,
+    style_name: str,
+    across: float,
+    major_d: float,
+    pitch: float,
+    nut_h: float,
+    output_path: Path,
+) -> None:
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.pdfgen import canvas
 
+    page_w, page_h = landscape(A4)
+    c = canvas.Canvas(str(output_path), pagesize=(page_w, page_h))
+    c.setTitle(f"Matching {style_name} Nut Drawing")
+
+    margin = 18
+    ix, iy = margin, margin
+    iw, ih = page_w - 2 * margin, page_h - 2 * margin
+    c.rect(ix, iy, iw, ih, stroke=1, fill=0)
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(ix + 16, iy + ih - 24, "Nut Engineering Drawing")
+    c.setFont("Helvetica", 9)
+    c.drawString(ix + 16, iy + ih - 38, f"Part: Matching {style_name} Nut")
+
+    # Top view
+    top_cx, top_cy = ix + 170, iy + ih * 0.58
+    top_r = 52
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(top_cx - 24, top_cy + top_r + 20, "TOP VIEW")
+    c.setLineWidth(1.2)
+    if style_name.lower().startswith("hex"):
+        pts = []
+        for k in range(6):
+            a = 0.523599 + k * 1.047198
+            pts.append((top_cx + top_r * math.cos(a), top_cy + top_r * math.sin(a)))
+        for i in range(6):
+            x1, y1 = pts[i]
+            x2, y2 = pts[(i + 1) % 6]
+            c.line(x1, y1, x2, y2)
+    else:
+        s = top_r * 1.5
+        c.rect(top_cx - s / 2, top_cy - s / 2, s, s, stroke=1, fill=0)
+    c.circle(top_cx, top_cy, max(6.0, major_d * 4.0), stroke=1, fill=0)
+
+    # Side view
+    sx, sy = ix + 320, iy + ih * 0.48
+    side_w = 170
+    side_h = 90
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(sx + 42, sy + side_h / 2 + 36, "SIDE VIEW")
+    c.setLineWidth(1.2)
+    c.rect(sx, sy - side_h / 2, side_w, side_h, stroke=1, fill=0)
+    c.setDash([2, 2], 0)
+    bore_half = max(8.0, major_d * 3.2)
+    c.line(sx + side_w * 0.25, sy - bore_half, sx + side_w * 0.25, sy + bore_half)
+    c.line(sx + side_w * 0.75, sy - bore_half, sx + side_w * 0.75, sy + bore_half)
+    c.setDash([], 0)
+
+    # Dimension notes
+    c.setFont("Helvetica", 9)
+    c.drawString(ix + 16, iy + 82, f"Across Flats / Width: {across:.2f} mm")
+    c.drawString(ix + 16, iy + 66, f"Thickness: {nut_h:.2f} mm")
+    c.drawString(ix + 16, iy + 50, f"Thread Major Dia: {major_d:.2f} mm")
+    c.drawString(ix + 16, iy + 34, f"Pitch: {pitch:.3f} mm")
+
+    c.save()
+
+
+def _is_yes(answer: str) -> bool:
+    return answer.strip().lower() in {"y", "yes"}
+
+
+def _build_matching_nut(chat: ChatState, base: ScrewSpec, nut_style: str) -> dict[str, Any]:
     try:
-        spec = screw_spec_from_query(chat.query, prompt=_prompt)
-    except _NeedInput as need:
-        chat.pending_question = need.question
-        return {
-            "status": "needs_input",
-            "question": need.question,
-            "message": _bot(chat, need.question, kind="question"),
-        }
-    except Exception as exc:
+        import cadquery as cq
+        from cadquery import exporters
+
+        from .threads import ThreadParams, apply_external_thread
+    except ModuleNotFoundError as exc:
         chat.pending_question = None
         return {
             "status": "error",
             "error": str(exc),
-            "message": _bot(chat, f"Could not generate fastener: {exc}", kind="error"),
+            "message": _bot(
+                chat,
+                "CAD runtime is missing (CadQuery/OCP). Install a compatible runtime to generate geometry.",
+                kind="error",
+            ),
         }
 
+    first_tr = next((r for r in base.regions if isinstance(r, ThreadRegionSpec)), None)
+    if first_tr is None:
+        return {
+            "status": "error",
+            "error": "No threaded region available for matching nut.",
+            "message": _bot(chat, "No thread region found, so I can't generate a matching nut.", kind="error"),
+        }
+
+    major_d = float(first_tr.major_d if first_tr.major_d is not None else base.shaft.d_minor * 1.15)
+    pitch = float(first_tr.pitch)
+    thread_height = first_tr.thread_height
+    nut_h = max(0.7 * major_d, min(1.0 * major_d, 0.85 * major_d))
+    style = nut_style.strip().lower()
+
+    if style.startswith("hex"):
+        af = max(1.6 * major_d, base.head.d)
+        # polygon(d) uses vertex-to-vertex diameter for regular polygons.
+        poly_d = 2.0 * af / (3.0**0.5)
+        body = cq.Workplane("XY").polygon(6, poly_d).extrude(nut_h)
+        style_name = "Hex"
+    else:
+        w = max(1.45 * major_d, 0.9 * base.head.d)
+        body = cq.Workplane("XY").rect(w, w).extrude(nut_h)
+        style_name = "Square"
+
+    body = body.translate((0, 0, -nut_h / 2.0))
+
+    # Build a threaded male "tap" and subtract it to get a matching internal thread.
+    tap_len = nut_h + 2.0
+    tap_spec = ShaftSpec(d_minor=base.shaft.d_minor, L=tap_len, tip_len=0.0)
+    tap_core = cq.Workplane("XY").circle(base.shaft.d_minor / 2.0).extrude(tap_len).translate((0, 0, -nut_h / 2.0 - 1.0))
+    try:
+        tap = apply_external_thread(
+            tap_core,
+            tap_spec,
+            ThreadParams(
+                pitch=pitch,
+                length=nut_h,
+                start_from_head=1.0,
+                included_angle_deg=60.0,
+                major_d=major_d,
+                thread_height=thread_height,
+                mode="add",
+            ),
+        )
+        nut = body.cut(tap)
+    except Exception:
+        # Fallback to a simple clearance bore if helical subtraction is unstable.
+        bore_r = major_d / 2.0 + 0.08
+        bore = cq.Workplane("XY").circle(bore_r).extrude(nut_h + 2.0).translate((0, 0, -nut_h / 2.0 - 1.0))
+        nut = body.cut(bore)
+
+    stamp = int(time.time() * 1000)
+    stem = f"matching_nut_{style_name.lower()}_d{major_d:.2f}_p{pitch:.2f}_{stamp}"
+    stem = re.sub(r"[^a-zA-Z0-9_-]+", "_", stem).strip("_").lower()
+    step_path = _DOWNLOAD_DIR / f"{stem}.step"
+    stl_path = _DOWNLOAD_DIR / f"{stem}.stl"
+    preview_path = _DOWNLOAD_DIR / f"{stem}.svg"
+    drawing_path = _DOWNLOAD_DIR / f"{stem}_drawing.pdf"
+    bundle_path = _DOWNLOAD_DIR / f"{stem}_bundle.zip"
+
+    from .export import export_step, export_stl
+
+    export_step(nut, step_path)
+    export_stl(nut, stl_path)
+    try:
+        exporters.export(
+            nut,
+            str(preview_path),
+            exportType="SVG",
+            opt={"projectionDir": (0.7, -0.5, 0.7), "showAxes": False, "showHidden": False},
+        )
+        preview_url = f"/downloads/{preview_path.name}"
+    except Exception:
+        preview_url = ""
+
+    drawing_url = ""
+    try:
+        across = af if style.startswith("hex") else w
+        _write_nut_drawing_pdf(
+            style_name=style_name,
+            across=float(across),
+            major_d=major_d,
+            pitch=pitch,
+            nut_h=nut_h,
+            output_path=drawing_path,
+        )
+        drawing_url = f"/downloads/{drawing_path.name}"
+    except Exception:
+        drawing_url = ""
+    try:
+        with zipfile.ZipFile(bundle_path, mode="w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            bundle.write(step_path, arcname=step_path.name)
+            bundle.write(stl_path, arcname=stl_path.name)
+            if drawing_url:
+                bundle.write(drawing_path, arcname=drawing_path.name)
+        bundle_url = f"/downloads/{bundle_path.name}"
+    except Exception:
+        bundle_url = ""
+
+    chat.latest_files = {
+        "step_url": f"/downloads/{step_path.name}",
+        "stl_url": f"/downloads/{stl_path.name}",
+        "preview_url": preview_url,
+        "drawing_url": drawing_url,
+        "bundle_url": bundle_url,
+    }
+    msg = _bot(
+        chat,
+        f"Matching {style_name.lower()} nut generated. Use the buttons to download STEP, STL, drawing PDF, or a ZIP bundle.",
+        kind="result",
+        extra=chat.latest_files,
+    )
+    return {"status": "ok", "message": msg}
+
+
+def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
     try:
         from .assembly import make_screw_from_spec
         from .export import export_step, export_stl
@@ -770,6 +960,32 @@ def _attempt_build(chat: ChatState) -> dict[str, Any]:
     return {"status": "ok", "message": msg}
 
 
+def _attempt_build(chat: ChatState) -> dict[str, Any]:
+    def _prompt(q: str) -> str:
+        if q in chat.answers:
+            return chat.answers[q]
+        raise _NeedInput(q)
+
+    try:
+        spec = screw_spec_from_query(chat.query, prompt=_prompt)
+    except _NeedInput as need:
+        chat.pending_question = need.question
+        return {
+            "status": "needs_input",
+            "question": need.question,
+            "message": _bot(chat, need.question, kind="question"),
+        }
+    except Exception as exc:
+        chat.pending_question = None
+        return {
+            "status": "error",
+            "error": str(exc),
+            "message": _bot(chat, f"Could not generate fastener: {exc}", kind="error"),
+        }
+    chat.latest_spec = spec
+    return _build_from_spec(chat, spec)
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     index_path = _WEB_DIR / "index.html"
@@ -860,6 +1076,8 @@ def edit_message(chat_id: int, msg_idx: int, body: EditMessageIn) -> dict[str, A
     chat.query = updated
     chat.answers = {}
     chat.pending_question = None
+    chat.pending_flow = None
+    chat.latest_spec = None
     result = _attempt_build(chat)
     return {
         "ok": True,
@@ -877,6 +1095,52 @@ def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
 
     raw = body.content
     content = raw.strip()
+
+    if chat.pending_flow == "matching_nut_offer":
+        if content:
+            _user(chat, content)
+        if _is_yes(content):
+            chat.pending_flow = "matching_nut_style"
+            chat.pending_question = _Q_MATCH_NUT_STYLE
+            _bot(chat, _Q_MATCH_NUT_STYLE, kind="question")
+            return {
+                "chat_id": chat.id,
+                "status": "needs_input",
+                "question": chat.pending_question,
+                "messages": chat.messages,
+                "pending_question": chat.pending_question,
+            }
+        chat.pending_flow = None
+        chat.pending_question = None
+        _bot(chat, "Okay, skipped matching nut.", kind="text")
+        return {
+            "chat_id": chat.id,
+            "status": "ok",
+            "messages": chat.messages,
+            "pending_question": chat.pending_question,
+        }
+
+    if chat.pending_flow == "matching_nut_style":
+        if content:
+            _user(chat, content)
+        base = chat.latest_spec
+        if base is None:
+            chat.pending_flow = None
+            chat.pending_question = None
+            _bot(chat, "Couldn't find the previous fastener to match. Please generate again.", kind="error")
+            return {
+                "chat_id": chat.id,
+                "status": "error",
+                "messages": chat.messages,
+                "pending_question": chat.pending_question,
+            }
+        choice = content.lower()
+        nut_style = "hex" if "hex" in choice else "square"
+        chat.pending_flow = None
+        chat.pending_question = None
+        result = _build_matching_nut(chat, base, nut_style)
+        return {"chat_id": chat.id, **result, "messages": chat.messages, "pending_question": chat.pending_question}
+
     if chat.pending_question is None and not content:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
     # Allow empty reply when prompt says "Press Enter to continue."
@@ -890,5 +1154,14 @@ def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
         chat.answers[chat.pending_question] = content
 
     result = _attempt_build(chat)
+    if (
+        result.get("status") == "ok"
+        and chat.latest_spec is not None
+        and chat.pending_flow is None
+        and chat.pending_question is None
+    ):
+        chat.pending_flow = "matching_nut_offer"
+        chat.pending_question = _Q_MATCH_NUT
+        _bot(chat, _Q_MATCH_NUT, kind="question")
     return {"chat_id": chat.id, **result, "messages": chat.messages, "pending_question": chat.pending_question}
 

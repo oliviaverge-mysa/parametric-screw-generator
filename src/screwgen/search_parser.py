@@ -279,7 +279,7 @@ def _ask_number(prompt: PromptFn, label: str) -> float:
 def _confirm(prompt: PromptFn | None, message: str) -> bool:
     if prompt is None:
         return False
-    answer = prompt(f"{message} [y/N]: ").strip().lower()
+    answer = prompt(message).strip().lower()
     return answer in {"y", "yes"}
 
 
@@ -458,7 +458,7 @@ def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpe
 
     if prompt is not None:
         if parsed.fastener_type is None:
-            ft = prompt("Is this a screw or a bolt? [screw/bolt]: ").strip().lower()
+            ft = prompt("Is this a screw or a bolt?").strip().lower()
             if ft in {"screw", "bolt"}:
                 parsed.fastener_type = ft
         if parsed.fastener_type is None:
@@ -487,7 +487,7 @@ def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpe
             if parsed.tip_len is None:
                 parsed.tip_len = _ask_number(prompt, "tip length")
         if parsed.drive_type is None and not parsed.drive_explicit_none:
-            dt, ds = _parse_drive_answer(prompt("What kind of drive is it? [hex/phillips/torx/no drive]: "))
+            dt, ds = _parse_drive_answer(prompt("What kind of drive is it?"))
             parsed.drive_type = dt
             parsed.drive_size = ds
         if thread_intent and parsed.pitch is None:

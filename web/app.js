@@ -132,7 +132,16 @@ function bubble(message, idx, latestUserIdx, chat) {
   const asksYesNoChoice =
     message.role === "bot" &&
     !!chat.pending_question &&
-    /\[y\/N\]:\s*$/i.test(chat.pending_question);
+    (
+      /\[y\/N\]:?\s*$/i.test(chat.pending_question) ||
+      /keep your value\?/i.test(chat.pending_question) ||
+      /do you want a matching nut\?/i.test(chat.pending_question) ||
+      /use max threadable length/i.test(chat.pending_question)
+    );
+  const asksRoundHexChoice =
+    message.role === "bot" &&
+    !!chat.pending_question &&
+    (/style for the matching nut/i.test(chat.pending_question) || /\[hex\/square\]:?\s*$/i.test(chat.pending_question));
   if (isLastMessage && asksFastenerChoice && chat.pending_question) {
     const choices = document.createElement("div");
     choices.className = "choice-actions";
@@ -173,6 +182,24 @@ function bubble(message, idx, latestUserIdx, chat) {
     const options = [
       ["y", "Yes"],
       ["n", "No"],
+    ];
+    for (const [value, label] of options) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "choice-btn";
+      btn.textContent = label;
+      btn.onclick = async () => {
+        await sendMessage(value);
+      };
+      choices.appendChild(btn);
+    }
+    node.appendChild(choices);
+  } else if (isLastMessage && asksRoundHexChoice && chat.pending_question) {
+    const choices = document.createElement("div");
+    choices.className = "choice-actions";
+    const options = [
+      ["hex", "Hex"],
+      ["square", "Square"],
     ];
     for (const [value, label] of options) {
       const btn = document.createElement("button");
