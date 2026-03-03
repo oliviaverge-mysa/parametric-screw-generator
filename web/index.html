@@ -10,52 +10,87 @@
   <section id="landing" class="landing">
     <div class="landing-overlay"></div>
     <div class="landing-content">
-      <div class="landing-brand">mysa</div>
+      <div class="landing-brand" aria-label="mysa">
+        <img
+          class="landing-logo"
+          src="https://cdn.sanity.io/images/yi14n6wi/production/8d9313dc9d8252a660f20b1a0f47a3b7eeeccdd1-1260x572.png"
+          alt="mysa"
+        />
+      </div>
       <h2>Fastener Generator</h2>
-      <p>Design parametric screws, bolts, and matching nuts in one flow.</p>
       <form id="landing-form" class="landing-search">
         <input id="landing-input" type="text" placeholder="Describe the fastener you want..." autocomplete="off" />
         <button id="landing-send-btn" type="submit">Generate</button>
       </form>
     </div>
   </section>
+  <header id="global-header" class="global-header">
+    <div class="global-header-left" aria-label="Sidebar controls">
+      <button id="global-menu-btn" class="global-icon-btn sidebar-menu-toggle" type="button" aria-label="Toggle sidebar">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <div class="brand-wordmark" aria-label="mysa logo">
+        <img
+          class="brand-wordmark-logo brand-wordmark-logo-light"
+          src="https://cdn.sanity.io/images/yi14n6wi/production/23c8f5899505ce623af8daccfced80de54904228-1260x572.png"
+          alt="mysa"
+        />
+        <img
+          class="brand-wordmark-logo brand-wordmark-logo-dark"
+          src="https://cdn.sanity.io/images/yi14n6wi/production/8d9313dc9d8252a660f20b1a0f47a3b7eeeccdd1-1260x572.png"
+          alt="mysa"
+        />
+      </div>
+    </div>
+    <button id="theme-toggle-btn" class="theme-toggle" type="button" aria-label="Toggle dark mode">
+      <span class="theme-toggle-thumb" aria-hidden="true"></span>
+    </button>
+  </header>
   <div class="app">
     <aside class="sidebar">
-      <div class="sidebar-top">
-        <div class="brand-lockup" aria-label="Mysa brand">
-          <div class="brand-icon" aria-hidden="true">
-            <span></span><span></span><span></span><span></span>
-            <span></span><span></span><span></span><span></span>
-            <span></span><span></span><span></span>
-          </div>
-          <div class="brand-wordmark">mysa</div>
-        </div>
-        <h1>Fastener Generator</h1>
-        <p class="brand-subtitle">Parametric screws, bolts, and matching nuts.</p>
-        <div class="sidebar-actions">
-          <button id="new-chat-btn">+ New Chat</button>
-          <button id="delete-chat-btn" class="danger-btn" type="button">Delete Current</button>
+      <section class="recent-fasteners">
+        <div class="recent-header">Recent Fasteners</div>
+        <div id="sidebar-recent-grid" class="sidebar-recent-grid"></div>
+      </section>
+      <div class="chats-header-row">
+        <div class="recent-header chats-label">Chats</div>
+        <div class="chats-actions">
+          <button id="new-chat-btn" class="icon-action-btn" type="button" aria-label="New chat" title="New chat"></button>
+          <button id="delete-chat-btn" class="icon-action-btn" type="button" aria-label="Delete current chat" title="Delete current chat">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8.5 5h7l.75 1H20v2H4V6h3.75L8.5 5ZM6 9h12l-1 10H7L6 9Zm3 2v6h2v-6H9Zm4 0v6h2v-6h-2Z" fill="currentColor"/>
+            </svg>
+          </button>
         </div>
       </div>
       <div id="chat-list" class="chat-list"></div>
     </aside>
 
     <main class="main">
-      <section class="chat-panel">
-        <div class="chat-toolbar">
-          <button id="toggle-sidebar-btn" class="toolbar-btn" type="button">Hide Chats</button>
-        </div>
+      <section id="chat-panel" class="chat-panel">
         <div id="messages" class="messages"></div>
         <form id="composer" class="composer">
           <input id="message-input" type="text" placeholder="Describe the fastener you want..." autocomplete="off" />
           <button type="submit">Send</button>
         </form>
       </section>
+      <section id="library-view" class="library-view" hidden>
+        <div class="library-header">
+          <h2>Fastener Library</h2>
+          <p>Browse generated fasteners, rename cards, and jump back into any source chat.</p>
+        </div>
+        <div id="library-grid" class="library-grid"></div>
+      </section>
     </main>
   </div>
   <div id="chat-context-menu" class="chat-context-menu" hidden>
     <button id="ctx-rename-chat-btn" class="toolbar-btn" type="button">Rename Chat</button>
     <button id="ctx-delete-chat-btn" class="danger-btn" type="button">Delete Chat</button>
+  </div>
+  <div id="library-context-menu" class="chat-context-menu" hidden>
+    <button id="ctx-rename-library-btn" class="toolbar-btn" type="button">Rename</button>
   </div>
 
   <script type="module" src="/assets/app.js"></script>

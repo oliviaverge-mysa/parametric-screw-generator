@@ -67,6 +67,9 @@ _CURSOR_ASSET_DIR = (
     / "c-Users-hardware-parametric-screw-generator"
     / "assets"
 )
+_LANDING_BG_OVERRIDE = _CURSOR_ASSET_DIR / (
+    "c__Users_hardware_AppData_Roaming_Cursor_User_workspaceStorage_background.png"
+)
 
 app = FastAPI(title="Fastener Generator Chat")
 app.mount("/assets", StaticFiles(directory=_WEB_DIR), name="assets")
@@ -126,6 +129,47 @@ def _unique_output_stem(base: str) -> str:
             return candidate
         candidate = f"{base}_{i}"
         i += 1
+
+
+def _solidify_preview_svg(svg_path: Path) -> None:
+    """Rewrite CadQuery SVG preview to use filled, solid-looking geometry."""
+    try:
+        text = svg_path.read_text(encoding="utf-8")
+    except Exception:
+        return
+
+    # Force a neutral solid style for exported vector geometry.
+    # CadQuery often exports outlines with fill="none"; replace those so the
+    # preview looks like a solid part in chat/sidebar/library cards.
+    text = re.sub(
+        r'fill="none"',
+        'fill="#d9dee7"',
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r'stroke="[^"]*"',
+        'stroke="#616b7a"',
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r'stroke-width="[^"]*"',
+        'stroke-width="1.15"',
+        text,
+        flags=re.IGNORECASE,
+    )
+    if "vector-effect=" not in text:
+        text = re.sub(
+            r"(<path\b[^>]*?)>",
+            r'\1 vector-effect="non-scaling-stroke">',
+            text,
+            flags=re.IGNORECASE,
+        )
+    try:
+        svg_path.write_text(text, encoding="utf-8")
+    except Exception:
+        return
 
 
 def _new_chat(title: str | None = None) -> ChatState:
@@ -1192,6 +1236,7 @@ def _build_nut_from_params(
             exportType="SVG",
             opt={"projectionDir": (0.7, -0.5, 0.7), "showAxes": False, "showHidden": False},
         )
+        _solidify_preview_svg(preview_path)
         preview_url = f"/downloads/{preview_path.name}"
     except Exception:
         preview_url = ""
@@ -1321,6 +1366,7 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
             )
         else:
             exporters.export(screw, str(preview_path), exportType="SVG")
+        _solidify_preview_svg(preview_path)
         preview_url = f"/downloads/{preview_path.name}"
     except Exception:
         preview_url = ""
@@ -1448,11 +1494,17 @@ def index() -> HTMLResponse:
 
 @app.get("/brand-bg")
 def brand_bg() -> FileResponse:
-    if _CURSOR_ASSET_DIR.exists():
-        matches = sorted(_CURSOR_ASSET_DIR.glob("**/mysa_fastener_laydown*.png"))
-        if matches:
-            return FileResponse(matches[-1])
-    raise HTTPException(status_code=404, detail="Brand background not found.")
+    no_cache_headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+    if not _LANDING_BG_OVERRIDE.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Brand background not found at: {_LANDING_BG_OVERRIDE}",
+        )
+    return FileResponse(_LANDING_BG_OVERRIDE, headers=no_cache_headers)
 
 
 @app.get("/api/chats", response_model=list[ChatSummary])
