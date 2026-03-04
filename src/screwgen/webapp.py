@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import itertools
+import json
 import math
+import os
 import re
 import zipfile
+import base64
+import urllib.request
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -37,6 +41,7 @@ class ChatState:
     latest_files: dict[str, str] = field(default_factory=dict)
     pending_flow: str | None = None
     latest_spec: ScrewSpec | None = None
+    image_estimate_query: str | None = None
 
 
 class MessageIn(BaseModel):
@@ -70,6 +75,12 @@ _CURSOR_ASSET_DIR = (
 _LANDING_BG_OVERRIDE = _CURSOR_ASSET_DIR / (
     "c__Users_hardware_AppData_Roaming_Cursor_User_workspaceStorage_background.png"
 )
+_UPLOAD_ICON_LIGHT = _CURSOR_ASSET_DIR / (
+    "c__Users_hardware_AppData_Roaming_Cursor_User_workspaceStorage_bfc2cdc3b2ece80366e8dec14240cc2e_images_add_photo_alternate_24dp_FFFFFF_FILL0_wght400_GRAD0_opsz24-97f9b11b-aa5e-4056-8853-73d55848759f.png"
+)
+_UPLOAD_ICON_DARK = _CURSOR_ASSET_DIR / (
+    "c__Users_hardware_AppData_Roaming_Cursor_User_workspaceStorage_bfc2cdc3b2ece80366e8dec14240cc2e_images_add_photo_alternate_24dp_000000_FILL0_wght400_GRAD0_opsz24-49373dc6-44e8-43a3-b61d-fb2650942ca8.png"
+)
 
 app = FastAPI(title="Fastener Generator Chat")
 app.mount("/assets", StaticFiles(directory=_WEB_DIR), name="assets")
@@ -80,6 +91,8 @@ _chats: dict[int, ChatState] = {}
 _Q_MATCH_NUT = "Do you want a matching nut?"
 _Q_MATCH_NUT_STYLE = "What style for the matching nut?"
 _Q_NUT_SHAPE = "What shape for the nut?"
+_Q_IMAGE_ESTIMATE_CONFIRM = "Use this estimated fastener spec to generate now? [y/N]"
+_Q_IMAGE_ESTIMATE_EDIT = "Type corrections to the estimate (for example: 'bolt, hex head, length 25, major diameter 5')."
 
 # Metric hex nut defaults (coarse series), keyed by thread major diameter (mm):
 # value = (across flats S, thickness M)
@@ -198,10 +211,411 @@ def _bot(chat: ChatState, content: str, kind: str = "text", extra: dict[str, Any
     return msg
 
 
-def _user(chat: ChatState, content: str) -> dict[str, Any]:
-    msg = {"role": "user", "content": content, "kind": "text"}
+def _user(chat: ChatState, content: str, kind: str = "text", extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    msg = {"role": "user", "content": content, "kind": kind}
+    if extra:
+        msg.update(extra)
     chat.messages.append(msg)
     return msg
+
+
+def _save_uploaded_image(upload: UploadFile, data: bytes) -> tuple[Path, str]:
+    ext = Path(upload.filename or "").suffix.lower()
+    if ext not in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}:
+        ext = ".png"
+    stem = _unique_output_stem(f"upload_{Path(upload.filename or 'image').stem}")
+    out_path = _DOWNLOAD_DIR / f"{stem}{ext}"
+    out_path.write_bytes(data)
+    return out_path, f"/downloads/{out_path.name}"
+
+
+def _estimate_query_from_image_multimodal(image_path: Path) -> tuple[str, str] | None:
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        return None
+
+    model = (os.getenv("OPENAI_VISION_MODEL") or "gpt-4o-mini").strip()
+    base_url = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    url = f"{base_url}/chat/completions"
+
+    try:
+        raw = image_path.read_bytes()
+    except Exception:
+        return None
+    mime = "image/png"
+    ext = image_path.suffix.lower()
+    if ext in {".jpg", ".jpeg"}:
+        mime = "image/jpeg"
+    elif ext == ".webp":
+        mime = "image/webp"
+    elif ext == ".gif":
+        mime = "image/gif"
+    b64 = base64.b64encode(raw).decode("ascii")
+    image_url = f"data:{mime};base64,{b64}"
+
+    system_msg = (
+        "You are a fastener-vision estimator. Analyze the image and infer ONE primary fastener only. "
+        "Ignore companion hardware such as washers/nuts/background items. "
+        "Return ONLY strict JSON with keys: "
+        "fastener_type, head_type, drive_type, major_d_mm, length_mm, pitch_mm, confidence, notes. "
+        "Allowed fastener_type: screw|bolt. "
+        "Allowed head_type: flat|pan|button|hex. "
+        "Allowed drive_type: hex|phillips|torx|square|no drive."
+    )
+    user_msg = (
+        "Estimate likely fastener parameters from this photo. "
+        "Use realistic metric defaults when unknown. "
+        "Do not mention companion hardware."
+    )
+
+    payload = {
+        "model": model,
+        "temperature": 0.1,
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_msg},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            },
+        ],
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+    content = ""
+    try:
+        content = body["choices"][0]["message"]["content"]
+    except Exception:
+        return None
+    if not isinstance(content, str) or not content.strip():
+        return None
+
+    text = content.strip()
+    m = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if m:
+        text = m.group(0)
+    try:
+        est = json.loads(text)
+    except Exception:
+        return None
+
+    fastener_type = str(est.get("fastener_type", "screw")).strip().lower()
+    head_type = str(est.get("head_type", "pan")).strip().lower()
+    drive_type = str(est.get("drive_type", "phillips")).strip().lower()
+    if fastener_type not in {"screw", "bolt"}:
+        fastener_type = "screw"
+    if head_type not in {"flat", "pan", "button", "hex"}:
+        head_type = "pan"
+    if drive_type not in {"hex", "phillips", "torx", "square", "no drive"}:
+        drive_type = "no drive"
+
+    def _f(key: str, lo: float, hi: float, fallback: float) -> float:
+        try:
+            v = float(est.get(key, fallback))
+        except Exception:
+            v = fallback
+        return max(lo, min(hi, v))
+
+    major_d = _f("major_d_mm", 2.0, 12.0, 4.0)
+    length = _f("length_mm", 8.0, 120.0, 24.0)
+    pitch = _f("pitch_mm", 0.35, 2.5, 0.8)
+    head_d = min(max(major_d * 1.35, major_d + 1.2), major_d * 1.65)
+    head_h = head_d * (0.42 if head_type == "flat" else 0.52 if head_type == "pan" else 0.48)
+    root_d = major_d * (0.84 if fastener_type == "screw" else 0.88)
+    thread_h = max(0.2, min(0.9, 0.34 * pitch))
+    thread_len = max(0.55 * length, min(0.90 * length, length - 2.0))
+    conf = _f("confidence", 0.0, 1.0, 0.55)
+    notes = str(est.get("notes", "")).strip()
+    query = (
+        f"{fastener_type} {head_type} {drive_type} "
+        f"head diameter {head_d:.2f} head height {head_h:.2f} "
+        f"shank diameter {major_d:.2f} root diameter {root_d:.2f} "
+        f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
+        f"thread length {thread_len:.2f}"
+    )
+    summary = (
+        "Estimated from image (multimodal vision model):\n"
+        f"- Type: {fastener_type}\n"
+        f"- Head: {head_type}\n"
+        f"- Drive: {drive_type}\n"
+        f"- Major diameter: {major_d:.2f} mm\n"
+        f"- Length: {length:.2f} mm\n"
+        f"- Pitch: {pitch:.2f} mm\n"
+        f"- Confidence: {conf:.2f}\n"
+        + (f"- Notes: {notes}\n" if notes else "")
+        + "Single-piece focus enabled (companion hardware ignored). Accept or provide corrections."
+    )
+    return query, summary
+
+
+def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
+    mm = _estimate_query_from_image_multimodal(image_path)
+    if mm is not None:
+        return mm
+
+    def _fallback_from_size() -> tuple[str, str]:
+        w, h = 1024, 768
+        try:
+            from PIL import Image  # type: ignore
+
+            with Image.open(image_path) as im:
+                w, h = im.size
+        except Exception:
+            pass
+        long_side = float(max(w, h))
+        short_side = float(max(1, min(w, h)))
+        aspect = long_side / short_side
+        major_d = 4.0 if long_side < 1200 else 5.0
+        fastener_type = "screw" if aspect >= 2.2 else "bolt"
+        head_type = "pan" if fastener_type == "screw" else "hex"
+        drive_type = "phillips" if fastener_type == "screw" else "no drive"
+        length = max(12.0, min(44.0, major_d * aspect * 2.0))
+        head_d = min(major_d * 1.55, major_d + 3.0)
+        head_h = head_d * (0.42 if head_type == "flat" else 0.52)
+        root_d = major_d * 0.84
+        pitch = max(0.5, min(1.5, 0.20 * major_d))
+        thread_h = max(0.2, min(0.8, 0.35 * pitch))
+        thread_len = max(0.55 * length, min(0.85 * length, length - 3.0))
+        query = (
+            f"{fastener_type} {head_type} {drive_type} "
+            f"head diameter {head_d:.2f} head height {head_h:.2f} "
+            f"shank diameter {major_d:.2f} root diameter {root_d:.2f} "
+            f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
+            f"thread length {thread_len:.2f}"
+        )
+        summary = (
+            "Estimated from image (basic fallback):\n"
+            f"- Type: {fastener_type}\n"
+            f"- Head: {head_type}\n"
+            f"- Drive: {drive_type}\n"
+            f"- Major diameter: {major_d:.2f} mm\n"
+            f"- Length: {length:.2f} mm\n"
+            f"- Pitch: {pitch:.2f} mm\n"
+            "You can accept this or provide corrections."
+        )
+        return query, summary
+
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+
+        arr = np.fromfile(str(image_path), dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None or img.size == 0:
+            return _fallback_from_size()
+        h, w = img.shape[:2]
+
+        # Estimate background from border pixels and segment foreground.
+        border = np.concatenate(
+            [img[0, :, :], img[-1, :, :], img[:, 0, :], img[:, -1, :]],
+            axis=0,
+        ).astype(np.float32)
+        bg = np.median(border, axis=0)
+        diff = np.linalg.norm(img.astype(np.float32) - bg[None, None, :], axis=2)
+        mask = (diff > 26).astype(np.uint8) * 255
+        k = np.ones((5, 5), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return _fallback_from_size()
+        cnt = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(cnt) < 0.01 * (w * h):
+            return _fallback_from_size()
+
+        x, y, bw, bh = cv2.boundingRect(cnt)
+        pad = 8
+        x0 = max(0, x - pad)
+        y0 = max(0, y - pad)
+        x1 = min(w, x + bw + pad)
+        y1 = min(h, y + bh + pad)
+        crop = img[y0:y1, x0:x1]
+        crop_mask = mask[y0:y1, x0:x1]
+
+        # Rotate so primary axis is horizontal.
+        pts = cv2.findNonZero(crop_mask)
+        if pts is None:
+            return _fallback_from_size()
+        rect = cv2.minAreaRect(pts)
+        (rw, rh) = rect[1]
+        angle = rect[2]
+        if rw < rh:
+            angle += 90.0
+        M = cv2.getRotationMatrix2D((crop.shape[1] / 2, crop.shape[0] / 2), angle, 1.0)
+        rot = cv2.warpAffine(crop, M, (crop.shape[1], crop.shape[0]), flags=cv2.INTER_LINEAR, borderValue=(0, 0, 0))
+        rot_mask = cv2.warpAffine(crop_mask, M, (crop.shape[1], crop.shape[0]), flags=cv2.INTER_NEAREST, borderValue=0)
+        pts2 = cv2.findNonZero(rot_mask)
+        if pts2 is None:
+            return _fallback_from_size()
+        x2, y2, bw2, bh2 = cv2.boundingRect(pts2)
+        rot = rot[y2 : y2 + bh2, x2 : x2 + bw2]
+        rot_mask = rot_mask[y2 : y2 + bh2, x2 : x2 + bw2]
+
+        # Width profile along length axis.
+        prof = (rot_mask > 0).sum(axis=0).astype(np.float32)
+        if prof.size < 18:
+            return _fallback_from_size()
+        kernel = np.ones(9, dtype=np.float32) / 9.0
+        prof = np.convolve(prof, kernel, mode="same")
+        n = prof.size
+        left_mean = float(np.mean(prof[: max(3, n // 10)]))
+        right_mean = float(np.mean(prof[-max(3, n // 10) :]))
+        head_left = left_mean >= right_mean
+        shaft_slice = prof[int(0.30 * n) : int(0.70 * n)]
+        shaft_w = float(np.median(shaft_slice[shaft_slice > 0])) if np.any(shaft_slice > 0) else float(np.median(prof))
+        shaft_w = max(shaft_w, 1.0)
+
+        # Pointed tip detection: tip end quickly tapers close to zero.
+        tip_arr = prof[-max(3, n // 30) :] if head_left else prof[: max(3, n // 30)]
+        tip_ratio = float(np.mean(tip_arr)) / shaft_w
+        pointed_tip = tip_ratio < 0.28
+        fastener_type = "screw" if pointed_tip else "bolt"
+
+        # Head size + taper profile from head side.
+        arr_head = prof if head_left else prof[::-1]
+        thr = 1.26 * shaft_w
+        head_len = 0
+        for v in arr_head:
+            if v >= thr:
+                head_len += 1
+            else:
+                break
+        head_len = max(head_len, 1)
+        head_zone = arr_head[: max(head_len, 6)]
+        head_ratio = float(np.max(head_zone)) / shaft_w
+        corr = 0.0
+        if head_zone.size >= 8:
+            xh = np.arange(head_zone.size, dtype=np.float32)
+            corr = abs(float(np.corrcoef(xh, head_zone)[0, 1]))
+        is_flat = head_ratio > 1.40 and corr > 0.70 and (head_len / shaft_w) < 1.2
+        if is_flat:
+            head_type = "flat"
+        elif head_ratio > 1.32:
+            head_type = "pan"
+        else:
+            head_type = "button"
+
+        # Drive detection from head region (ignore companion hardware; use main piece only).
+        drive_type = "no drive"
+        head_width_px = int(min(rot.shape[1], max(16, round(1.3 * head_len))))
+        if head_left:
+            head_roi = rot[:, :head_width_px]
+        else:
+            head_roi = rot[:, -head_width_px:]
+        gray = cv2.cvtColor(head_roi, cv2.COLOR_BGR2GRAY)
+        # Focus on dark recesses near center.
+        dark = (gray < np.percentile(gray, 35)).astype(np.uint8) * 255
+        dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        cnts, _ = cv2.findContours(dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if cnts:
+            hroi, wroi = dark.shape[:2]
+            cx, cy = wroi * 0.5, hroi * 0.5
+            best = None
+            best_score = -1.0
+            for c in cnts:
+                area = cv2.contourArea(c)
+                if area < 12:
+                    continue
+                M2 = cv2.moments(c)
+                if M2["m00"] <= 0:
+                    continue
+                xcc = M2["m10"] / M2["m00"]
+                ycc = M2["m01"] / M2["m00"]
+                d = math.hypot(xcc - cx, ycc - cy)
+                score = area - 0.9 * d
+                if score > best_score:
+                    best_score = score
+                    best = c
+            if best is not None:
+                peri = cv2.arcLength(best, True)
+                approx = cv2.approxPolyDP(best, 0.05 * peri, True)
+                verts = len(approx)
+                if 4 <= verts <= 5:
+                    drive_type = "square"
+                else:
+                    edges = cv2.Canny(gray, 70, 150)
+                    lines = cv2.HoughLinesP(edges, 1, np.pi / 180.0, threshold=20, minLineLength=10, maxLineGap=4)
+                    if lines is not None:
+                        hv = 0
+                        diag = 0
+                        for ln in lines[:, 0, :]:
+                            x1l, y1l, x2l, y2l = ln
+                            ang = abs(math.degrees(math.atan2(y2l - y1l, x2l - x1l)))
+                            ang = min(ang, 180.0 - ang)
+                            if ang < 16 or abs(ang - 90.0) < 16:
+                                hv += 1
+                            if abs(ang - 45.0) < 16:
+                                diag += 1
+                        if hv >= 2:
+                            drive_type = "phillips"
+                        elif diag >= 2:
+                            drive_type = "square"
+
+        # Scale dimensions from pixel ratios to plausible metric sizes.
+        obj_len_px = float(n)
+        rel = shaft_w / max(obj_len_px, 1.0)
+        major_cont = max(2.5, min(8.0, rel * 44.0))
+        common = [3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 8.0]
+        major_d = min(common, key=lambda d: abs(d - major_cont))
+        length = max(10.0, min(80.0, major_d * (obj_len_px / shaft_w) * 0.60))
+
+        def _coarse_pitch(d: float) -> float:
+            if d <= 3.0:
+                return 0.50
+            if d <= 4.0:
+                return 0.70
+            if d <= 5.0:
+                return 0.80
+            if d <= 6.0:
+                return 1.00
+            if d <= 8.0:
+                return 1.25
+            return 1.50
+
+        pitch = _coarse_pitch(major_d)
+        head_d = min(max(major_d * 1.35, head_ratio * major_d * 0.95), major_d * 1.58)
+        head_h = head_d * (0.42 if head_type == "flat" else 0.52 if head_type == "pan" else 0.48)
+        root_d = major_d * (0.84 if fastener_type == "screw" else 0.88)
+        thread_h = max(0.2, min(0.85, 0.34 * pitch))
+        thread_len = max(0.55 * length, min(0.88 * length, length - 3.0))
+
+        query = (
+            f"{fastener_type} {head_type} {drive_type} "
+            f"head diameter {head_d:.2f} head height {head_h:.2f} "
+            f"shank diameter {major_d:.2f} root diameter {root_d:.2f} "
+            f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
+            f"thread length {thread_len:.2f}"
+        )
+        summary = (
+            "Estimated from image (computer vision pass):\n"
+            f"- Type: {fastener_type}\n"
+            f"- Head: {head_type}\n"
+            f"- Drive: {drive_type}\n"
+            f"- Major diameter: {major_d:.2f} mm\n"
+            f"- Length: {length:.2f} mm\n"
+            f"- Pitch: {pitch:.2f} mm\n"
+            "Single-piece focus enabled (companion hardware ignored). "
+            "Accept or provide corrections."
+        )
+        return query, summary
+    except Exception:
+        return _fallback_from_size()
 
 
 def _chat_title_for_spec(spec) -> str:
@@ -268,6 +682,12 @@ def _write_engineering_drawing_svg(spec, output_path: Path) -> None:
             y = top_cy + r * __import__("math").sin(a)
             pts.append(f"{x:.1f},{y:.1f}")
         drive_glyph = f'<polygon points="{" ".join(pts)}" class="ink" fill="none"/>'
+    elif drive == "square":
+        s = top_r * 0.44
+        drive_glyph = (
+            f'<rect x="{top_cx - s/2.0:.1f}" y="{top_cy - s/2.0:.1f}" '
+            f'width="{s:.1f}" height="{s:.1f}" class="ink" fill="none"/>'
+        )
 
     thread_lines = []
     if threaded_len > 0:
@@ -1507,6 +1927,20 @@ def brand_bg() -> FileResponse:
     return FileResponse(_LANDING_BG_OVERRIDE, headers=no_cache_headers)
 
 
+@app.get("/upload-icon-light")
+def upload_icon_light() -> FileResponse:
+    if not _UPLOAD_ICON_LIGHT.exists():
+        raise HTTPException(status_code=404, detail=f"Upload icon not found at: {_UPLOAD_ICON_LIGHT}")
+    return FileResponse(_UPLOAD_ICON_LIGHT)
+
+
+@app.get("/upload-icon-dark")
+def upload_icon_dark() -> FileResponse:
+    if not _UPLOAD_ICON_DARK.exists():
+        raise HTTPException(status_code=404, detail=f"Upload icon not found at: {_UPLOAD_ICON_DARK}")
+    return FileResponse(_UPLOAD_ICON_DARK)
+
+
 @app.get("/api/chats", response_model=list[ChatSummary])
 def list_chats() -> list[ChatSummary]:
     for chat in _chats.values():
@@ -1609,6 +2043,76 @@ def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
     raw = body.content
     content = raw.strip()
 
+    if chat.pending_flow == "image_estimate_confirm":
+        if content:
+            _user(chat, content)
+        if _is_yes(content):
+            if not chat.image_estimate_query:
+                chat.pending_flow = None
+                chat.pending_question = None
+                _bot(chat, "I lost the image estimate context. Please upload the image again.", kind="error")
+                return {
+                    "chat_id": chat.id,
+                    "status": "error",
+                    "messages": chat.messages,
+                    "pending_question": chat.pending_question,
+                }
+            chat.pending_flow = None
+            chat.pending_question = None
+            chat.query = chat.image_estimate_query
+            chat.answers = {}
+            result = _attempt_build(chat)
+            if (
+                result.get("status") == "ok"
+                and chat.latest_spec is not None
+                and chat.pending_flow is None
+                and chat.pending_question is None
+            ):
+                chat.pending_flow = "matching_nut_offer"
+                chat.pending_question = _Q_MATCH_NUT
+                _bot(chat, _Q_MATCH_NUT, kind="question")
+            return {"chat_id": chat.id, **result, "messages": chat.messages, "pending_question": chat.pending_question}
+        chat.pending_flow = "image_estimate_edit"
+        chat.pending_question = _Q_IMAGE_ESTIMATE_EDIT
+        _bot(chat, _Q_IMAGE_ESTIMATE_EDIT, kind="question")
+        return {
+            "chat_id": chat.id,
+            "status": "needs_input",
+            "question": chat.pending_question,
+            "messages": chat.messages,
+            "pending_question": chat.pending_question,
+        }
+
+    if chat.pending_flow == "image_estimate_edit":
+        if not content:
+            raise HTTPException(status_code=400, detail="Please provide corrections to continue.")
+        _user(chat, content)
+        if not chat.image_estimate_query:
+            chat.pending_flow = None
+            chat.pending_question = None
+            _bot(chat, "I lost the image estimate context. Please upload the image again.", kind="error")
+            return {
+                "chat_id": chat.id,
+                "status": "error",
+                "messages": chat.messages,
+                "pending_question": chat.pending_question,
+            }
+        chat.pending_flow = None
+        chat.pending_question = None
+        chat.query = f"{chat.image_estimate_query} {content}"
+        chat.answers = {}
+        result = _attempt_build(chat)
+        if (
+            result.get("status") == "ok"
+            and chat.latest_spec is not None
+            and chat.pending_flow is None
+            and chat.pending_question is None
+        ):
+            chat.pending_flow = "matching_nut_offer"
+            chat.pending_question = _Q_MATCH_NUT
+            _bot(chat, _Q_MATCH_NUT, kind="question")
+        return {"chat_id": chat.id, **result, "messages": chat.messages, "pending_question": chat.pending_question}
+
     if chat.pending_flow == "matching_nut_offer":
         if content:
             _user(chat, content)
@@ -1677,4 +2181,33 @@ def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
         chat.pending_question = _Q_MATCH_NUT
         _bot(chat, _Q_MATCH_NUT, kind="question")
     return {"chat_id": chat.id, **result, "messages": chat.messages, "pending_question": chat.pending_question}
+
+
+@app.post("/api/chats/{chat_id}/image")
+async def post_image(chat_id: int, file: UploadFile = File(...), content: str = Form("")) -> dict[str, Any]:
+    chat = _chats.get(chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found.")
+    ctype = (file.content_type or "").lower()
+    if not ctype.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image uploads are supported.")
+
+    data = await file.read()
+    image_path, image_url = _save_uploaded_image(file, data)
+    caption = content.strip() or "Uploaded reference image"
+    _user(chat, caption, kind="image", extra={"image_url": image_url})
+
+    est_query, summary = _estimate_query_from_image(image_path)
+    chat.image_estimate_query = est_query
+    chat.pending_flow = "image_estimate_confirm"
+    chat.pending_question = _Q_IMAGE_ESTIMATE_CONFIRM
+    _bot(chat, f"{summary}\n\n{_Q_IMAGE_ESTIMATE_CONFIRM}", kind="question")
+
+    return {
+        "chat_id": chat.id,
+        "status": "needs_input",
+        "question": chat.pending_question,
+        "messages": chat.messages,
+        "pending_question": chat.pending_question,
+    }
 

@@ -73,6 +73,12 @@
         <div id="messages" class="messages"></div>
         <form id="composer" class="composer">
           <input id="message-input" type="text" placeholder="Describe the fastener you want..." autocomplete="off" />
+          <button id="image-upload-btn" class="icon-action-btn composer-image-btn" type="button" aria-label="Upload image" title="Upload image">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 3.5h6l1.3 2H20a2 2 0 0 1 2 2v10.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2h3.7l1.3-2Zm3 4.2a4.2 4.2 0 1 0 0 8.4 4.2 4.2 0 0 0 0-8.4Zm0 1.7a2.5 2.5 0 1 1 0 5.0 2.5 2.5 0 0 1 0-5.0Zm-6.7.1a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z" fill="currentColor"/>
+            </svg>
+          </button>
+          <input id="image-input" type="file" accept="image/*" hidden />
           <button type="submit">Send</button>
         </form>
       </section>

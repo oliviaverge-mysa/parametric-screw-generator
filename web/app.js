@@ -2,6 +2,8 @@ const chatListEl = document.getElementById("chat-list");
 const messagesEl = document.getElementById("messages");
 const formEl = document.getElementById("composer");
 const inputEl = document.getElementById("message-input");
+const imageUploadBtn = document.getElementById("image-upload-btn");
+const imageInputEl = document.getElementById("image-input");
 const newChatBtn = document.getElementById("new-chat-btn");
 const deleteChatBtn = document.getElementById("delete-chat-btn");
 const toggleSidebarBtn = document.getElementById("toggle-sidebar-btn");
@@ -28,8 +30,6 @@ let pendingQuestion = null;
 let contextChatId = null;
 let contextChatTitle = "";
 let contextLibraryItemKey = null;
-let editingMessageIdx = null;
-let editingDraft = "";
 let renamingChatId = null;
 let renamingChatDraft = "";
 let activeView = "chat";
@@ -358,22 +358,6 @@ function renderLibraryGrid() {
     card.className = "library-card";
     card.oncontextmenu = (e) => showLibraryContextMenu(e, item);
 
-    const deleteIconBtn = document.createElement("button");
-    deleteIconBtn.type = "button";
-    deleteIconBtn.className = "library-delete-icon";
-    deleteIconBtn.title = "Delete from library";
-    deleteIconBtn.setAttribute("aria-label", "Delete from library");
-    deleteIconBtn.innerHTML = `
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M8.5 5h7l.75 1H20v2H4V6h3.75L8.5 5ZM6 9h12l-1 10H7L6 9Zm3 2v6h2v-6H9Zm4 0v6h2v-6h-2Z" fill="currentColor"/>
-      </svg>
-    `;
-    deleteIconBtn.onclick = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      deleteLibraryItem(item);
-    };
-
     const media = document.createElement("div");
     media.className = "library-media";
     if (item.preview_url) {
@@ -420,7 +404,23 @@ function renderLibraryGrid() {
     renameBtn.onclick = () => renameLibraryItem(item);
     actions.appendChild(renameBtn);
 
-    card.appendChild(deleteIconBtn);
+    const deleteIconBtn = document.createElement("button");
+    deleteIconBtn.type = "button";
+    deleteIconBtn.className = "library-delete-icon";
+    deleteIconBtn.title = "Delete from library";
+    deleteIconBtn.setAttribute("aria-label", "Delete from library");
+    deleteIconBtn.innerHTML = `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8.5 5h7l.75 1H20v2H4V6h3.75L8.5 5ZM6 9h12l-1 10H7L6 9Zm3 2v6h2v-6H9Zm4 0v6h2v-6h-2Z" fill="currentColor"/>
+      </svg>
+    `;
+    deleteIconBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteLibraryItem(item);
+    };
+    actions.appendChild(deleteIconBtn);
+
     card.appendChild(title);
     card.appendChild(media);
     card.appendChild(actions);
@@ -537,6 +537,43 @@ async function sendMessage(rawValue) {
   }
 }
 
+async function sendImageMessage(file) {
+  if (!file) return;
+  if (composerSendBtn.disabled) return;
+  if (!currentChatId) {
+    await createChat();
+  }
+  setWorking(true);
+  try {
+    const body = new FormData();
+    body.append("file", file);
+    body.append("content", file.name || "Uploaded reference image");
+    const res = await fetch(`/api/chats/${currentChatId}/image`, {
+      method: "POST",
+      body,
+    });
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => ({ detail: "Image upload failed." }));
+      alert(errorBody.detail || "Could not process image.");
+      await loadChat(currentChatId);
+      return;
+    }
+    const data = await res.json();
+    if (!data.chat_id) {
+      alert("Image request failed, please retry.");
+      await loadChat(currentChatId);
+      return;
+    }
+    await loadChat(data.chat_id);
+  } catch (_) {
+    alert("Network error while uploading image. Please retry.");
+    await loadChat(currentChatId);
+  } finally {
+    if (imageInputEl) imageInputEl.value = "";
+    setWorking(false);
+  }
+}
+
 function renderChatList(chats) {
   chatListEl.innerHTML = "";
   for (const chat of chats) {
@@ -615,40 +652,17 @@ function bubble(message, idx, latestUserIdx, chat) {
   const node = document.createElement("div");
   node.className = `bubble ${message.role}`;
 
-  if (message.role === "user" && idx === editingMessageIdx) {
-    node.classList.add("editing");
-    const input = document.createElement("textarea");
-    input.className = "edit-input";
-    input.value = editingDraft || message.content;
-    input.rows = 2;
-    input.oninput = () => {
-      editingDraft = input.value;
-    };
-    input.onkeydown = async (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        await saveEdit(idx);
-      }
-    };
-    node.appendChild(input);
-
-    const actions = document.createElement("div");
-    actions.className = "edit-actions";
-    const saveBtn = document.createElement("button");
-    saveBtn.className = "edit-btn";
-    saveBtn.textContent = "Save";
-    saveBtn.onclick = async () => saveEdit(idx);
-    const cancelBtn = document.createElement("button");
-    cancelBtn.className = "edit-btn";
-    cancelBtn.textContent = "Cancel";
-    cancelBtn.onclick = () => {
-      editingMessageIdx = null;
-      editingDraft = "";
-      loadChat(currentChatId);
-    };
-    actions.appendChild(saveBtn);
-    actions.appendChild(cancelBtn);
-    node.appendChild(actions);
+  if (message.kind === "image" && message.image_url) {
+    const imageWrap = document.createElement("div");
+    imageWrap.className = "chat-upload-wrap";
+    const img = document.createElement("img");
+    img.className = "chat-upload-image";
+    img.src = message.image_url;
+    img.alt = message.content || "Uploaded image";
+    imageWrap.appendChild(img);
+    node.appendChild(imageWrap);
+  } else if (message.kind === "result" && message.stl_url) {
+    // Result text is already shown in the preview card header.
   } else {
     const content = document.createElement("div");
     content.textContent = message.content;
@@ -789,42 +803,7 @@ function bubble(message, idx, latestUserIdx, chat) {
   if (message.kind === "result" && message.stl_url) {
     node.appendChild(resultCard(message, idx));
   }
-
-  if (message.role === "user" && idx === latestUserIdx) {
-    const editBtn = document.createElement("button");
-    editBtn.className = "edit-btn";
-    editBtn.textContent = "Edit";
-    editBtn.onclick = () => {
-      editingMessageIdx = idx;
-      editingDraft = message.content;
-      loadChat(currentChatId);
-    };
-    node.appendChild(editBtn);
-  }
   return node;
-}
-
-async function saveEdit(idx) {
-  const updated = editingDraft.trim();
-  if (!updated) {
-    alert("Edited message cannot be empty.");
-    return;
-  }
-  setWorking(true);
-  const res = await fetch(`/api/chats/${currentChatId}/messages/${idx}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: updated }),
-  });
-  setWorking(false);
-  if (!res.ok) {
-    const errorBody = await res.json().catch(() => ({ detail: "Could not edit message." }));
-    alert(errorBody.detail || "Could not edit message.");
-    return;
-  }
-  editingMessageIdx = null;
-  editingDraft = "";
-  await loadChat(currentChatId);
 }
 
 function resultCard(message, messageIdx = -1) {
@@ -953,6 +932,7 @@ function renderMessages(chat) {
 
 function setWorking(isWorking) {
   composerSendBtn.disabled = isWorking;
+  if (imageUploadBtn) imageUploadBtn.disabled = isWorking;
   composerSendBtn.textContent = isWorking ? "Working..." : "Send";
 }
 
@@ -1008,6 +988,18 @@ formEl.addEventListener("submit", async (e) => {
   e.preventDefault();
   await sendMessage(inputEl.value);
 });
+
+if (imageUploadBtn && imageInputEl) {
+  imageUploadBtn.addEventListener("click", () => {
+    if (composerSendBtn.disabled) return;
+    imageInputEl.click();
+  });
+  imageInputEl.addEventListener("change", async () => {
+    const file = imageInputEl.files && imageInputEl.files[0];
+    if (!file) return;
+    await sendImageMessage(file);
+  });
+}
 
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {

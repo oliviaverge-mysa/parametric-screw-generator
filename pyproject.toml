@@ -15,6 +15,9 @@ dependencies = [
   "uvicorn",
   "reportlab",
   "svglib",
+  "python-multipart",
+  "Pillow",
+  "opencv-python-headless",
 ]
 
 [tool.setuptools.packages.find]

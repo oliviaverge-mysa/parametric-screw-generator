@@ -360,6 +360,29 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 .bubble.user.editing { width: 78%; max-width: 78%; min-width: 320px; }
 .bubble.bot { align-self: flex-start; background: #fff; border-color: var(--mysa-line); }
 
+.chat-upload-wrap {
+  width: min(360px, 100%);
+  border: 1px solid var(--ui-line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.chat-upload-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 280px;
+  object-fit: contain;
+  background: #fff;
+}
+
+.chat-upload-caption {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ui-muted);
+}
+
 .bubble .edit-btn {
   margin-top: 8px;
   border: 1px solid #c5d1eb;
@@ -407,6 +430,30 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
   outline: none;
   border-color: #9db5ef;
   box-shadow: 0 0 0 3px #0a4cff14;
+}
+
+.composer-image-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-elevated);
+  color: var(--brand-ink, #2f456d);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.composer-image-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  color: inherit;
+}
+
+.composer-image-btn:hover {
+  opacity: 0.9;
 }
 
 .choice-actions { display: flex; gap: 8px; margin-top: 10px; }
@@ -1440,15 +1487,15 @@ body[data-theme="dark"] .preview-card-header {
 }
 
 body[data-theme="dark"] .library-media {
-  background: #ffffff;
-  border-color: #d8dde5;
-  color: #4f5867;
+  background: #e8edf3;
+  border-color: #c9d1dc;
+  color: #4c5668;
 }
 
 body[data-theme="dark"] .recent-thumb {
-  background: #ffffff;
-  border-color: #d8dde5;
-  color: #4f5867;
+  background: #e8edf3;
+  border-color: #c9d1dc;
+  color: #4c5668;
 }
 
 .preview-canvas {
@@ -1457,7 +1504,12 @@ body[data-theme="dark"] .recent-thumb {
 }
 
 body[data-theme="dark"] .preview-canvas {
-  background: #ffffff;
+  background: #e8edf3;
+}
+
+body[data-theme="dark"] .result-actions {
+  background: #e6ebf1;
+  border-top-color: #c8d0db;
 }
 
 .preview-canvas img,
@@ -1511,9 +1563,13 @@ body[data-theme="dark"] .preview-canvas {
   transform-origin: center center;
 }
 
+/* CadQuery SVGs for screws can be slightly left-biased; nudge in chat preview. */
+.chat-panel .preview-canvas:not(.nut-preview) img.preview-img-colorized {
+  transform: translateX(3.5%);
+}
+
 .library-card {
   padding: 8px;
-  position: relative;
 }
 
 .library-item-title {
@@ -1529,16 +1585,16 @@ body[data-theme="dark"] .preview-canvas {
 
 .library-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 6px;
 }
 
 .library-actions .toolbar-btn,
 .library-actions .download-btn,
 .library-actions .danger-btn {
   border-radius: 12px;
-  padding: 7px 8px;
-  font-size: 12px;
+  padding: 6px 8px;
+  font-size: 11px;
   text-align: center;
 }
 
@@ -1549,31 +1605,30 @@ body[data-theme="dark"] .preview-canvas {
 }
 
 .library-delete-icon {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid #f0bfd0;
+  background: #ffeef4;
   color: #8d2a4a;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   cursor: pointer;
-  z-index: 2;
 }
 
 .library-delete-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   display: block;
   color: inherit;
 }
 
 .library-delete-icon:hover {
-  opacity: 0.82;
+  background: #ffe3ec;
+  border-color: #e8adc1;
 }
 
 /* Shopping-style library grid: two columns by default */
@@ -1682,5 +1737,35 @@ body[data-theme="dark"] #new-chat-btn {
 /* Toggle thumb should also use softer navy */
 .theme-toggle-thumb {
   background: var(--brand-ink);
+}
+
+/* Composer image upload button keeps a compact button shell */
+.composer .composer-image-btn {
+  border: 1px solid var(--ui-line) !important;
+  background: var(--ui-elevated) !important;
+  border-radius: 10px !important;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+}
+
+/* Keep composer controls aligned and same height */
+.composer input,
+.composer button,
+.composer .composer-image-btn {
+  height: 44px;
+  box-sizing: border-box;
+}
+
+.composer button[type="submit"] {
+  padding: 0 16px;
+}
+
+.composer .composer-image-btn svg {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  display: block;
+  color: inherit;
 }
 

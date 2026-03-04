@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Literal, Union
 
 HeadType = Literal["flat", "pan", "button", "hex"]
-DriveType = Literal["hex", "phillips", "torx"]
+DriveType = Literal["hex", "phillips", "torx", "square"]
 DriveFit = Literal["nominal", "scale_to_head", "max_that_fits"]
 Handedness = Literal["RH", "LH"]
 FastenerType = Literal["screw", "bolt"]

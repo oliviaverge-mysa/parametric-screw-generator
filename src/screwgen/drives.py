@@ -10,7 +10,7 @@ from typing import Callable, Literal
 
 import cadquery as cq
 
-DriveType = Literal["hex", "phillips", "torx"]
+DriveType = Literal["hex", "phillips", "torx", "square"]
 DriveSize = Literal[3, 4, 6]
 DriveFit = Literal["nominal", "scale_to_head", "max_that_fits"]
 
@@ -18,19 +18,21 @@ DRIVE_DIMS: dict[tuple[DriveType, DriveSize], dict] = {
     ("hex", 3): {"across_flats": 3.0},
     ("phillips", 4): {"slot_w": 1.6, "slot_l": 5.5},
     ("torx", 6): {"r_outer": 3.0, "r_inner": 2.2, "r_fillet": 0.35, "segments": 48},
+    ("square", 4): {"side": 2.4},
 }
 
 CONFIG: dict[str, float] = {
     "hex_opening_fraction": 0.35,
     "phillips_opening_fraction": 0.45,
     "torx_opening_fraction": 0.38,
+    "square_opening_fraction": 0.34,
     "min_wall_abs": 0.6,
     "min_wall_fraction": 0.12,
     "cone_cover_margin": 0.2,
     "cone_tip_radius": 0.05,
 }
 
-_VALID_COMBOS: dict[DriveType, DriveSize] = {"hex": 3, "phillips": 4, "torx": 6}
+_VALID_COMBOS: dict[DriveType, DriveSize] = {"hex": 3, "phillips": 4, "torx": 6, "square": 4}
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,8 @@ def _target_opening_diameter(p: DriveParams) -> float:
         target = CONFIG["hex_opening_fraction"] * p.head_d
     elif p.type == "phillips":
         target = CONFIG["phillips_opening_fraction"] * p.head_d
+    elif p.type == "square":
+        target = CONFIG["square_opening_fraction"] * p.head_d
     else:
         target = CONFIG["torx_opening_fraction"] * p.head_d
     return min(target, 2.0 * _max_opening_radius(p))
@@ -128,6 +132,12 @@ def _torx_profile(r_outer: float, r_inner: float, segments: int) -> cq.Workplane
         theta = 2.0 * math.pi * i / segments
         r = r_mean + r_amp * math.cos(6.0 * theta)
         pts.append((r * math.cos(theta), r * math.sin(theta)))
+    return cq.Workplane("XY").polyline(pts).close()
+
+
+def _square_profile(side: float) -> cq.Workplane:
+    s = side / 2.0
+    pts = [(-s, -s), (s, -s), (s, s), (-s, s)]
     return cq.Workplane("XY").polyline(pts).close()
 
 
@@ -174,6 +184,14 @@ def _make_torx_cut(p: DriveParams) -> cq.Workplane:
     return _build_dished_cut(p, lambda: _torx_profile(r_outer, r_inner, segments), r_outer)
 
 
+def _make_square_cut(p: DriveParams) -> cq.Workplane:
+    nominal_side = DRIVE_DIMS[("square", 4)]["side"] + 2.0 * p.clearance
+    scale = _opening_scale(p, nominal_side * math.sqrt(2.0))
+    side = nominal_side * scale
+    opening_radius = (side * math.sqrt(2.0)) / 2.0
+    return _build_dished_cut(p, lambda: _square_profile(side), opening_radius)
+
+
 def make_drive_cut(p: DriveParams) -> cq.Workplane:
     _validate(p)
     if p.type == "hex":
@@ -182,5 +200,7 @@ def make_drive_cut(p: DriveParams) -> cq.Workplane:
         return _make_phillips_cut(p)
     if p.type == "torx":
         return _make_torx_cut(p)
+    if p.type == "square":
+        return _make_square_cut(p)
     raise ValueError(f"Unhandled drive type: {p.type!r}")
 
