@@ -29,6 +29,7 @@ def _is_valid(wp: cq.Workplane) -> bool:
 _DRIVE_PARAMS = [
     DriveParams(type="hex", size=3, depth=_DEPTH, topZ=_TOP_Z, fit="scale_to_head", head_d=_D),
     DriveParams(type="phillips", size=4, depth=_DEPTH, topZ=_TOP_Z, fit="scale_to_head", head_d=_D),
+    DriveParams(type="square", size=5, depth=_DEPTH, topZ=_TOP_Z, fit="scale_to_head", head_d=_D),
     DriveParams(type="torx", size=6, depth=_DEPTH, topZ=_TOP_Z, fit="scale_to_head", head_d=_D),
 ]
 _HEAD_SPECS: list[HeadParams] = [
@@ -39,7 +40,7 @@ _HEAD_SPECS: list[HeadParams] = [
 ]
 
 
-@pytest.mark.parametrize("dp", _DRIVE_PARAMS, ids=["hex_3", "phillips_4", "torx_6"])
+@pytest.mark.parametrize("dp", _DRIVE_PARAMS, ids=["hex_3", "phillips_4", "square_5", "torx_6"])
 class TestDriveCutGeometry:
     def test_z_span(self, dp: DriveParams):
         bb = _bbox(make_drive_cut(dp))

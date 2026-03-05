@@ -212,7 +212,7 @@ def _infer_drive(text: str) -> tuple[str | None, int | None]:
     if re.search(r"\b(phillips|philips|cross[- ]head)\b", text):
         return "phillips", 4
     if re.search(r"\b(square drive|robertson|square recess)\b", text):
-        return "square", 4
+        return "square", 5
     if re.search(r"\b(hex drive|allen|hex socket|socket head)\b", text):
         return "hex", 3
     return None, None
@@ -233,7 +233,7 @@ def _parse_drive_answer(raw: str) -> tuple[str | None, int | None]:
     if "phillips" in a or "philips" in a or "cross" in a:
         return "phillips", 4
     if "square" in a or "robertson" in a:
-        return "square", 4
+        return "square", 5
     if "hex" in a or "allen" in a or "socket" in a:
         return "hex", 3
     return None, None

@@ -683,11 +683,8 @@ def _write_engineering_drawing_svg(spec, output_path: Path) -> None:
             pts.append(f"{x:.1f},{y:.1f}")
         drive_glyph = f'<polygon points="{" ".join(pts)}" class="ink" fill="none"/>'
     elif drive == "square":
-        s = top_r * 0.44
-        drive_glyph = (
-            f'<rect x="{top_cx - s/2.0:.1f}" y="{top_cy - s/2.0:.1f}" '
-            f'width="{s:.1f}" height="{s:.1f}" class="ink" fill="none"/>'
-        )
+        s = top_r * 0.50
+        drive_glyph = f'<rect x="{top_cx - s/2:.1f}" y="{top_cy - s/2:.1f}" width="{s:.1f}" height="{s:.1f}" class="ink" fill="none"/>'
 
     thread_lines = []
     if threaded_len > 0:
@@ -990,6 +987,9 @@ def _write_engineering_drawing_pdf(
             x1, y1 = pts[i]
             x2, y2 = pts[(i + 1) % 6]
             c.line(x1, y1, x2, y2)
+    elif drive == "square":
+        s = top_r * 0.62
+        c.rect(top_cx - s / 2.0, top_cy - s / 2.0, s, s, stroke=1, fill=0)
     c.setLineWidth(1)
 
     c.setFont("Helvetica-Bold", 10)
@@ -1771,7 +1771,8 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
     step_path = export_step(screw, _DOWNLOAD_DIR / f"{stem}.step")
     stl_path = export_stl(screw, _DOWNLOAD_DIR / f"{stem}.stl")
     preview_path = _DOWNLOAD_DIR / f"{stem}.svg"
-    drawing_path = _DOWNLOAD_DIR / f"{stem}_drawing.pdf"
+    drawing_pdf_path = _DOWNLOAD_DIR / f"{stem}_drawing.pdf"
+    drawing_svg_path = _DOWNLOAD_DIR / f"{stem}_drawing.svg"
     bundle_path = _DOWNLOAD_DIR / f"{stem}_bundle.zip"
     try:
         if spec.head.type == "flat":
@@ -1790,6 +1791,7 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
         preview_url = f"/downloads/{preview_path.name}"
     except Exception:
         preview_url = ""
+    drawing_export_path: Path | None = None
     try:
         iso_preview_path = _DOWNLOAD_DIR / f"{stem}_iso.svg"
         try:
@@ -1809,20 +1811,27 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
 
         _write_engineering_drawing_pdf(
             spec,
-            drawing_path,
+            drawing_pdf_path,
             screw_name=chat.title,
             author_name=Path.home().name,
             iso_svg_path=iso_preview_path,
         )
-        drawing_url = f"/downloads/{drawing_path.name}"
+        drawing_export_path = drawing_pdf_path
+        drawing_url = f"/downloads/{drawing_pdf_path.name}"
     except Exception:
-        drawing_url = ""
+        # Fallback keeps "Download Drawing" usable even if PDF deps are missing.
+        try:
+            _write_engineering_drawing_svg(spec, drawing_svg_path)
+            drawing_export_path = drawing_svg_path
+            drawing_url = f"/downloads/{drawing_svg_path.name}"
+        except Exception:
+            drawing_url = ""
     try:
         with zipfile.ZipFile(bundle_path, mode="w", compression=zipfile.ZIP_DEFLATED) as bundle:
             bundle.write(step_path, arcname=step_path.name)
             bundle.write(stl_path, arcname=stl_path.name)
-            if drawing_url:
-                bundle.write(drawing_path, arcname=drawing_path.name)
+            if drawing_export_path is not None:
+                bundle.write(drawing_export_path, arcname=drawing_export_path.name)
         bundle_url = f"/downloads/{bundle_path.name}"
     except Exception:
         bundle_url = ""

@@ -97,7 +97,8 @@ def test_make_screw_from_spec_valid_solid():
     assert screw.val().Volume() > 0
 
 
-def test_multiple_thread_regions_not_supported_yet():
-    with pytest.raises(NotImplementedError, match="only one ThreadRegionSpec"):
-        make_screw_from_spec(_base_spec("pan"), include_thread_markers=True)
+def test_multiple_thread_regions_are_supported():
+    screw = make_screw_from_spec(_base_spec("pan"), include_thread_markers=True)
+    assert screw.val().isValid()
+    assert screw.val().Volume() > 0
 

@@ -32,6 +32,7 @@ def _drive_specs_for_head(head_params: HeadParams) -> list[DriveParams]:
     return [
         DriveParams(type="hex", size=3, depth=depth, topZ=tool_z, fit="scale_to_head", head_d=d),
         DriveParams(type="phillips", size=4, depth=depth, topZ=tool_z, fit="scale_to_head", head_d=d),
+        DriveParams(type="square", size=5, depth=depth, topZ=tool_z, fit="scale_to_head", head_d=d),
         DriveParams(type="torx", size=6, depth=depth, topZ=tool_z, fit="scale_to_head", head_d=d),
     ]
 

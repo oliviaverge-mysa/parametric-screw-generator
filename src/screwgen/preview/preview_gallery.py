@@ -14,7 +14,7 @@ from ..heads import HeadParams, head_tool_z, make_head
 from ..shaft import ShaftParams, attach_shaft_to_head, make_shaft
 
 HEAD_TYPES = ["flat", "pan", "button", "hex"]
-DRIVE_TYPES = [("hex", 3), ("phillips", 4), ("torx", 6)]
+DRIVE_TYPES = [("hex", 3), ("phillips", 4), ("square", 5), ("torx", 6)]
 SHAFT_VARIANTS = {"A": ShaftParams(d_minor=3.0, L=20.0, tip_len=3.0), "B": ShaftParams(d_minor=4.0, L=35.0, tip_len=4.0)}
 
 

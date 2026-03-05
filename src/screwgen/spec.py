@@ -23,7 +23,7 @@ class HeadSpec:
 @dataclass(frozen=True)
 class DriveSpec:
     type: DriveType
-    size: Literal[3, 4, 6]
+    size: Literal[3, 4, 5, 6]
     depth: float | None = None
     fit: DriveFit = "max_that_fits"
     clearance: float = 0.05

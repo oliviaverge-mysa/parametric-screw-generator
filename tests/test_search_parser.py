@@ -30,6 +30,14 @@ def test_parse_query_extracts_drive_type():
     assert parsed.drive_size == 6
 
 
+def test_parse_query_extracts_square_drive_type():
+    parsed = parse_query(
+        "pan head diameter 8 head height 4 shank diameter 4 root diameter 3 length 25 tip 3 robertson drive"
+    )
+    assert parsed.drive_type == "square"
+    assert parsed.drive_size == 5
+
+
 def test_parse_query_detects_bolt_fastener_type():
     parsed = parse_query("hex bolt head diameter 12 shank diameter 6 root diameter 5 length 30")
     assert parsed.fastener_type == "bolt"
@@ -77,6 +85,14 @@ def test_screw_spec_sets_drive_when_requested():
     assert spec.drive is not None
     assert spec.drive.type == "torx"
     assert spec.drive.size == 6
+
+
+def test_screw_spec_sets_square_drive_when_requested():
+    q = "pan square drive head diameter 8 head height 4 shank diameter 4 root diameter 3 length 24 tip length 2"
+    spec = screw_spec_from_query(q)
+    assert spec.drive is not None
+    assert spec.drive.type == "square"
+    assert spec.drive.size == 5
 
 
 def test_screw_spec_prompts_for_fastener_type_when_missing():

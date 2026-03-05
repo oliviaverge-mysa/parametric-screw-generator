@@ -11,28 +11,28 @@ from typing import Callable, Literal
 import cadquery as cq
 
 DriveType = Literal["hex", "phillips", "torx", "square"]
-DriveSize = Literal[3, 4, 6]
+DriveSize = Literal[3, 4, 5, 6]
 DriveFit = Literal["nominal", "scale_to_head", "max_that_fits"]
 
 DRIVE_DIMS: dict[tuple[DriveType, DriveSize], dict] = {
     ("hex", 3): {"across_flats": 3.0},
     ("phillips", 4): {"slot_w": 1.6, "slot_l": 5.5},
+    ("square", 5): {"across_flats": 2.6},
     ("torx", 6): {"r_outer": 3.0, "r_inner": 2.2, "r_fillet": 0.35, "segments": 48},
-    ("square", 4): {"side": 2.4},
 }
 
 CONFIG: dict[str, float] = {
     "hex_opening_fraction": 0.35,
     "phillips_opening_fraction": 0.45,
+    "square_opening_fraction": 0.35,
     "torx_opening_fraction": 0.38,
-    "square_opening_fraction": 0.34,
     "min_wall_abs": 0.6,
     "min_wall_fraction": 0.12,
     "cone_cover_margin": 0.2,
     "cone_tip_radius": 0.05,
 }
 
-_VALID_COMBOS: dict[DriveType, DriveSize] = {"hex": 3, "phillips": 4, "torx": 6, "square": 4}
+_VALID_COMBOS: dict[DriveType, DriveSize] = {"hex": 3, "phillips": 4, "square": 5, "torx": 6}
 
 
 @dataclass(frozen=True)
@@ -135,10 +135,8 @@ def _torx_profile(r_outer: float, r_inner: float, segments: int) -> cq.Workplane
     return cq.Workplane("XY").polyline(pts).close()
 
 
-def _square_profile(side: float) -> cq.Workplane:
-    s = side / 2.0
-    pts = [(-s, -s), (s, -s), (s, s), (-s, s)]
-    return cq.Workplane("XY").polyline(pts).close()
+def _square_profile(af: float) -> cq.Workplane:
+    return cq.Workplane("XY").rect(af, af)
 
 
 def _build_dished_cut(
@@ -185,11 +183,10 @@ def _make_torx_cut(p: DriveParams) -> cq.Workplane:
 
 
 def _make_square_cut(p: DriveParams) -> cq.Workplane:
-    nominal_side = DRIVE_DIMS[("square", 4)]["side"] + 2.0 * p.clearance
-    scale = _opening_scale(p, nominal_side * math.sqrt(2.0))
-    side = nominal_side * scale
-    opening_radius = (side * math.sqrt(2.0)) / 2.0
-    return _build_dished_cut(p, lambda: _square_profile(side), opening_radius)
+    nominal_af = DRIVE_DIMS[("square", 5)]["across_flats"] + 2.0 * p.clearance
+    af = nominal_af * _opening_scale(p, nominal_af)
+    opening_radius = af / math.sqrt(2.0)
+    return _build_dished_cut(p, lambda: _square_profile(af), opening_radius)
 
 
 def make_drive_cut(p: DriveParams) -> cq.Workplane:
@@ -198,9 +195,9 @@ def make_drive_cut(p: DriveParams) -> cq.Workplane:
         return _make_hex_cut(p)
     if p.type == "phillips":
         return _make_phillips_cut(p)
-    if p.type == "torx":
-        return _make_torx_cut(p)
     if p.type == "square":
         return _make_square_cut(p)
+    if p.type == "torx":
+        return _make_torx_cut(p)
     raise ValueError(f"Unhandled drive type: {p.type!r}")
 

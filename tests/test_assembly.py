@@ -62,7 +62,7 @@ def test_non_flat_shaft_remains_below_head(hp: HeadParams):
 
 def test_screw_gallery_exports(tmp_path):
     gallery, section, count = export_gallery(tmp_path)
-    assert count == 24
+    assert count == 32
     assert gallery.exists()
     assert section.exists()
 
