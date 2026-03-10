@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Fastener Generator Chat</title>
-  <link rel="stylesheet" href="/assets/styles.css" />
+  <link rel="stylesheet" href="/assets/styles.css?v=20260309-landing-image" />
 </head>
 <body>
   <section id="landing" class="landing">
@@ -20,6 +20,12 @@
       <h2>Fastener Generator</h2>
       <form id="landing-form" class="landing-search">
         <input id="landing-input" type="text" placeholder="Describe the fastener you want..." autocomplete="off" />
+        <button id="landing-image-btn" class="landing-image-btn" type="button" aria-label="Upload image" title="Upload an image of a fastener">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 3.5h6l1.3 2H20a2 2 0 0 1 2 2v10.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2h3.7l1.3-2Zm3 4.2a4.2 4.2 0 1 0 0 8.4 4.2 4.2 0 0 0 0-8.4Zm0 1.7a2.5 2.5 0 1 1 0 5.0 2.5 2.5 0 0 1 0-5.0Zm-6.7.1a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z" fill="currentColor"/>
+          </svg>
+        </button>
+        <input id="landing-image-input" type="file" accept="image/*" hidden />
         <button id="landing-send-btn" type="submit">Generate</button>
       </form>
     </div>
@@ -99,7 +105,7 @@
     <button id="ctx-rename-library-btn" class="toolbar-btn" type="button">Rename</button>
   </div>
 
-  <script type="module" src="/assets/app.js"></script>
+  <script type="module" src="/assets/app.js?v=20260309-landing-image"></script>
 </body>
 </html>
 

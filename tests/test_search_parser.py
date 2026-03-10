@@ -171,6 +171,19 @@ def test_unrealistic_root_ratio_gets_suggested_value_when_user_accepts():
     assert spec.shaft.d_minor < 3.95
 
 
+def test_can_skip_realism_checks_for_image_estimates():
+    q = (
+        "screw pan no drive head diameter 8 head height 4 shank diameter 4 root diameter 3.95 "
+        "length 20 tip length 2 pitch 1 thread length 16 thread height 0.5"
+    )
+
+    def prompt(_: str) -> str:
+        raise AssertionError("prompt should not be called when realism checks are disabled")
+
+    spec = screw_spec_from_query(q, prompt=prompt, apply_realism_checks=False)
+    assert spec.shaft.d_minor == pytest.approx(3.95)
+
+
 def test_parse_query_reads_head_width_and_threads_of_phrase():
     parsed = parse_query("9mm long screw with a 4mm wide head and 4mm of threads")
     assert parsed.length == 9.0

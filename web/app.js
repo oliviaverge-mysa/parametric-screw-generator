@@ -24,6 +24,8 @@ const landingEl = document.getElementById("landing");
 const landingFormEl = document.getElementById("landing-form");
 const landingInputEl = document.getElementById("landing-input");
 const landingSendBtn = document.getElementById("landing-send-btn");
+const landingImageBtn = document.getElementById("landing-image-btn");
+const landingImageInputEl = document.getElementById("landing-image-input");
 
 let currentChatId = null;
 let pendingQuestion = null;
@@ -304,10 +306,12 @@ function renderSidebarRecent() {
     const preview = document.createElement("div");
     preview.className = "recent-thumb";
     if (item.preview_url) {
-      const img = document.createElement("img");
-      img.src = item.preview_url;
-      img.alt = recentItemName(item);
-      preview.appendChild(img);
+      initPreviewImage(preview, item.preview_url, {
+        onReady: () => {},
+        onError: () => {
+          preview.textContent = "Preview unavailable";
+        },
+      });
     } else {
       preview.textContent = "No preview";
     }
@@ -361,10 +365,12 @@ function renderLibraryGrid() {
     const media = document.createElement("div");
     media.className = "library-media";
     if (item.preview_url) {
-      const img = document.createElement("img");
-      img.src = item.preview_url;
-      img.alt = itemName(item);
-      media.appendChild(img);
+      initPreviewImage(media, item.preview_url, {
+        onReady: () => {},
+        onError: () => {
+          media.textContent = "Preview unavailable";
+        },
+      });
     } else {
       media.textContent = "Preview unavailable";
     }
@@ -909,8 +915,24 @@ function initPreviewImage(container, previewUrl, hooks) {
   }
   const img = document.createElement("img");
   img.alt = "Fastener preview";
+  // Keep sizing deterministic even if external CSS is stale/cached.
+  img.style.width = "98%";
+  img.style.height = "98%";
+  img.style.objectFit = "contain";
+  img.style.objectPosition = "center center";
+  img.style.display = "block";
+  img.style.margin = "auto";
+  let retried = false;
   img.onload = () => hooks.onReady();
-  img.onerror = () => hooks.onError();
+  img.onerror = () => {
+    if (!retried) {
+      retried = true;
+      const glue = previewUrl.includes("?") ? "&" : "?";
+      img.src = `${previewUrl}${glue}v=${Date.now()}`;
+      return;
+    }
+    hooks.onError();
+  };
   img.src = previewUrl;
   img.className = "preview-img-colorized";
   container.innerHTML = "";
@@ -1128,6 +1150,21 @@ if (landingFormEl) {
       landingSendBtn.disabled = false;
       landingSendBtn.textContent = previousLabel;
     }
+  });
+}
+
+if (landingImageBtn && landingImageInputEl) {
+  landingImageBtn.addEventListener("click", () => {
+    landingImageInputEl.click();
+  });
+  landingImageInputEl.addEventListener("change", async () => {
+    const file = landingImageInputEl.files && landingImageInputEl.files[0];
+    if (!file) return;
+    setLandingMode(false);
+    setActiveView("chat");
+    await createChat();
+    await sendImageMessage(file);
+    landingImageInputEl.value = "";
   });
 }
 

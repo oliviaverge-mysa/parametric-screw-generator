@@ -109,7 +109,7 @@ body.landing-active #library-view {
   margin: 0 auto;
   width: min(820px, 92vw);
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 10px;
   background: #ffffff;
@@ -140,7 +140,7 @@ body.landing-active #library-view {
   color: #6f86ac;
 }
 
-.landing-search button {
+.landing-search button[type="submit"] {
   border: 1px solid #33496f;
   border-radius: 999px;
   padding: 11px 18px;
@@ -149,6 +149,30 @@ body.landing-active #library-view {
   background: #33496f;
   cursor: pointer;
   box-shadow: 0 8px 22px #33496f3b;
+}
+
+.landing-image-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #33496f;
+  border-radius: 50%;
+  background: transparent;
+  color: #c0cfe0;
+  cursor: pointer;
+  margin: 0 6px;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.landing-image-btn svg {
+  width: 20px;
+  height: 20px;
+}
+.landing-image-btn:hover {
+  background: #33496f;
+  color: #fff;
 }
 
 .app { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
@@ -1330,9 +1354,16 @@ body[data-theme="dark"] .chat-item.active {
   border-color: #f0bfd0;
 }
 
-.chat-panel,
-.library-view {
+.chat-panel {
   background: transparent;
+}
+
+.library-view {
+  background: linear-gradient(180deg, #f3f4f6 0%, #eceef1 100%);
+}
+
+body[data-theme="dark"] .library-view {
+  background: linear-gradient(180deg, #1a1e24 0%, #15191e 100%);
 }
 
 .chat-toolbar {

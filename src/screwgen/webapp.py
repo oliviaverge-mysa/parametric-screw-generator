@@ -84,7 +84,6 @@ _UPLOAD_ICON_DARK = _CURSOR_ASSET_DIR / (
 
 app = FastAPI(title="Fastener Generator Chat")
 app.mount("/assets", StaticFiles(directory=_WEB_DIR), name="assets")
-app.mount("/downloads", StaticFiles(directory=_DOWNLOAD_DIR), name="downloads")
 
 _chat_counter = itertools.count(1)
 _chats: dict[int, ChatState] = {}
@@ -145,37 +144,113 @@ def _unique_output_stem(base: str) -> str:
 
 
 def _solidify_preview_svg(svg_path: Path) -> None:
-    """Rewrite CadQuery SVG preview to use filled, solid-looking geometry."""
+    """Rewrite CadQuery SVG preview with cleaner CAD-style shading."""
     try:
         text = svg_path.read_text(encoding="utf-8")
     except Exception:
         return
 
-    # Force a neutral solid style for exported vector geometry.
-    # CadQuery often exports outlines with fill="none"; replace those so the
-    # preview looks like a solid part in chat/sidebar/library cards.
+    # Add a subtle blue-grey gradient similar to CAD viewport shading.
+    if 'id="sgShade"' not in text:
+        defs = (
+            '<defs>'
+            '<linearGradient id="sgShade" x1="0%" y1="0%" x2="100%" y2="100%">'
+            '<stop offset="0%" stop-color="#c6dde0"/>'
+            '<stop offset="45%" stop-color="#adc4c8"/>'
+            '<stop offset="100%" stop-color="#8ea7ab"/>'
+            "</linearGradient>"
+            "</defs>"
+        )
+        text = re.sub(r"(<svg\b[^>]*>)", r"\1" + defs, text, count=1, flags=re.IGNORECASE)
+
+    def _is_closed_path(path_d: str) -> bool:
+        if "z" in path_d.lower():
+            return True
+        vals = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", path_d)
+        if len(vals) < 4:
+            return False
+        try:
+            x0, y0 = float(vals[0]), float(vals[1])
+            x1, y1 = float(vals[-2]), float(vals[-1])
+        except Exception:
+            return False
+        return math.hypot(x1 - x0, y1 - y0) <= 1e-3
+
+    def _rewrite_path(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        d_match = re.search(r'\bd="([^"]*)"', tag, flags=re.IGNORECASE)
+        is_closed = _is_closed_path(d_match.group(1)) if d_match else False
+        fill_attr = 'fill="url(#sgShade)" fill-opacity="0.90"' if is_closed else 'fill="none"'
+
+        # Remove inherited/raw style attributes and apply a consistent style.
+        tag = re.sub(r'\sfill="[^"]*"', "", tag, flags=re.IGNORECASE)
+        tag = re.sub(r'\sfill-opacity="[^"]*"', "", tag, flags=re.IGNORECASE)
+        tag = re.sub(r'\sstroke="[^"]*"', "", tag, flags=re.IGNORECASE)
+        tag = re.sub(r'\sstroke-width="[^"]*"', "", tag, flags=re.IGNORECASE)
+        tag = re.sub(r'\sstroke-dasharray="[^"]*"', "", tag, flags=re.IGNORECASE)
+        tag = re.sub(r'\svector-effect="[^"]*"', "", tag, flags=re.IGNORECASE)
+        tag = re.sub(r"<path\b", "<path", tag, count=1, flags=re.IGNORECASE)
+        tag = tag.replace(
+            "<path",
+            (
+                '<path stroke="#3f4a56" stroke-width="1.05" '
+                'stroke-linejoin="round" stroke-linecap="round" '
+                f'{fill_attr} vector-effect="non-scaling-stroke"'
+            ),
+            1,
+        )
+        return tag
+
+    # Apply per-path styling so open paths are never filled (prevents random
+    # triangle artifacts from implicit path closure).
+    text = re.sub(r"<path\b[^>]*>", _rewrite_path, text, flags=re.IGNORECASE)
+
+    # Remove style inheritance from groups; paths now carry explicit styles.
+    def _clean_group_tag(match: re.Match[str]) -> str:
+        gtag = match.group(0)
+        gtag = re.sub(r'\sfill="[^"]*"', "", gtag, flags=re.IGNORECASE)
+        gtag = re.sub(r'\sstroke="[^"]*"', "", gtag, flags=re.IGNORECASE)
+        gtag = re.sub(r'\sstroke-width="[^"]*"', "", gtag, flags=re.IGNORECASE)
+        gtag = re.sub(r'\sstroke-dasharray="[^"]*"', "", gtag, flags=re.IGNORECASE)
+        return gtag
+
+    text = re.sub(r"<g\b[^>]*>", _clean_group_tag, text, flags=re.IGNORECASE)
+
+    # Remove helper/hidden groups entirely; when filled they create fake
+    # diagonal "cut" artifacts across the preview.
     text = re.sub(
-        r'fill="none"',
-        'fill="#d9dee7"',
+        r"<g\b[^>]*stroke-dasharray=\"[^\"]*\"[^>]*>.*?</g>",
+        "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    # Remove dashed hidden-edge styling if any leaks through export.
+    text = re.sub(
+        r'\s+stroke-dasharray="[^"]*"',
+        "",
         text,
         flags=re.IGNORECASE,
     )
+    # Remove leaked axis labels from previews.
     text = re.sub(
-        r'stroke="[^"]*"',
-        'stroke="#616b7a"',
+        r"<text\b[^>]*>.*?</text>",
+        "",
         text,
-        flags=re.IGNORECASE,
+        flags=re.IGNORECASE | re.DOTALL,
     )
+    # Repair legacy malformed path tags from older rewrites:
+    #   <path ... / vector-effect="non-scaling-stroke">
+    # -> <path ... vector-effect="non-scaling-stroke"/>
     text = re.sub(
-        r'stroke-width="[^"]*"',
-        'stroke-width="1.15"',
+        r'(<path\b[^>]*?)\s+/\s+vector-effect="non-scaling-stroke"\s*>',
+        r'\1 vector-effect="non-scaling-stroke"/>',
         text,
         flags=re.IGNORECASE,
     )
     if "vector-effect=" not in text:
         text = re.sub(
-            r"(<path\b[^>]*?)>",
-            r'\1 vector-effect="non-scaling-stroke">',
+            r"(<path\b[^>]*?)(/?)>",
+            r'\1 vector-effect="non-scaling-stroke"\2>',
             text,
             flags=re.IGNORECASE,
         )
@@ -418,45 +493,176 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None or img.size == 0:
             return _fallback_from_size()
-        h, w = img.shape[:2]
 
-        # Estimate background from border pixels and segment foreground.
-        border = np.concatenate(
-            [img[0, :, :], img[-1, :, :], img[:, 0, :], img[:, -1, :]],
-            axis=0,
-        ).astype(np.float32)
-        bg = np.median(border, axis=0)
-        diff = np.linalg.norm(img.astype(np.float32) - bg[None, None, :], axis=2)
-        mask = (diff > 26).astype(np.uint8) * 255
-        k = np.ones((5, 5), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)
+        def _clamp(v: float, lo: float, hi: float) -> float:
+            return max(lo, min(hi, v))
 
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
+        def _extract_subject(src):
+            h0, w0 = src.shape[:2]
+            img_area = float(max(1, h0 * w0))
+            gray0 = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+
+            # If input is a screenshot, first try to isolate the near-square
+            # image card by edge geometry.
+            edge_card = None
+            edges0 = cv2.Canny(gray0, 60, 160)
+            edges0 = cv2.dilate(edges0, np.ones((3, 3), np.uint8), iterations=1)
+            card_edges, _ = cv2.findContours(edges0, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            best_edge_score = -1.0
+            for c in card_edges:
+                area = float(cv2.contourArea(c))
+                if area < 0.03 * img_area or area > 0.92 * img_area:
+                    continue
+                x, y, bw, bh = cv2.boundingRect(c)
+                if bw <= 0 or bh <= 0:
+                    continue
+                ar = bw / float(max(1, bh))
+                if ar < 0.70 or ar > 1.45:
+                    continue
+                peri = cv2.arcLength(c, True)
+                approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+                if len(approx) < 4 or len(approx) > 10:
+                    continue
+                cx = x + 0.5 * bw
+                cy = y + 0.5 * bh
+                center_penalty = math.hypot(cx - 0.5 * w0, cy - 0.5 * h0) / max(w0, h0)
+                square_penalty = abs(math.log(max(ar, 1.0 / max(ar, 1e-6))))
+                fill = area / float(max(1, bw * bh))
+                score = (area / img_area) + 0.35 * fill - 1.15 * center_penalty - 0.75 * square_penalty
+                if score > best_edge_score:
+                    best_edge_score = score
+                    edge_card = (x, y, bw, bh)
+            if edge_card is not None:
+                x, y, bw, bh = edge_card
+                pad = max(5, int(0.02 * min(bw, bh)))
+                x0 = max(0, x + pad)
+                y0 = max(0, y + pad)
+                x1 = min(w0, x + bw - pad)
+                y1 = min(h0, y + bh - pad)
+                if (x1 - x0) > 60 and (y1 - y0) > 60:
+                    src = src[y0:y1, x0:x1]
+                    gray0 = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+                    h0, w0 = src.shape[:2]
+
+            # Then try bright-card extraction as a secondary screenshot pass.
+            white = (gray0 > 236).astype(np.uint8) * 255
+            white = cv2.morphologyEx(white, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+            card_cnts, _ = cv2.findContours(white, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            img_area = float(max(1, h0 * w0))
+            best_card = None
+            best_card_score = -1.0
+
+            def _scan_cards(prefer_square: bool) -> tuple[tuple[int, int, int, int] | None, float]:
+                local_best = None
+                local_best_score = -1.0
+                for c in card_cnts:
+                    area = float(cv2.contourArea(c))
+                    if area < 0.02 * img_area or area > 0.88 * img_area:
+                        continue
+                    x, y, bw, bh = cv2.boundingRect(c)
+                    if bw <= 0 or bh <= 0:
+                        continue
+                    ar = bw / float(max(1, bh))
+                    if prefer_square:
+                        if ar < 0.72 or ar > 1.45:
+                            continue
+                    elif ar < 0.42 or ar > 2.1:
+                        continue
+                    cx = x + 0.5 * bw
+                    cy = y + 0.5 * bh
+                    center_penalty = math.hypot(cx - 0.5 * w0, cy - 0.5 * h0) / max(w0, h0)
+                    square_penalty = abs(math.log(max(ar, 1.0 / max(ar, 1e-6))))
+                    area_frac = area / img_area
+                    score = area_frac - 1.35 * center_penalty - (0.70 * square_penalty if prefer_square else 0.18 * square_penalty)
+                    if score > local_best_score:
+                        local_best_score = score
+                        local_best = (x, y, bw, bh)
+                return local_best, local_best_score
+
+            best_card, best_card_score = _scan_cards(prefer_square=True)
+            if best_card is None:
+                best_card, best_card_score = _scan_cards(prefer_square=False)
+            if best_card is not None:
+                x, y, bw, bh = best_card
+                pad = 5
+                x0 = max(0, x + pad)
+                y0 = max(0, y + pad)
+                x1 = min(w0, x + bw - pad)
+                y1 = min(h0, y + bh - pad)
+                if (x1 - x0) > 40 and (y1 - y0) > 40:
+                    src = src[y0:y1, x0:x1]
+                    gray0 = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY)
+
+            def _extract_from(src_in):
+                h1, w1 = src_in.shape[:2]
+                border = np.concatenate([src_in[0, :, :], src_in[-1, :, :], src_in[:, 0, :], src_in[:, -1, :]], axis=0).astype(
+                    np.float32
+                )
+                bg = np.median(border, axis=0)
+                diff = np.linalg.norm(src_in.astype(np.float32) - bg[None, None, :], axis=2)
+                thr = max(20.0, float(np.percentile(diff, 83)))
+                mask = (diff > thr).astype(np.uint8) * 255
+                mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+
+                cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if not cnts:
+                    return None
+
+                def _score_contour(c):
+                    area = float(cv2.contourArea(c))
+                    if area <= 0:
+                        return -1.0e9
+                    x, y, bw, bh = cv2.boundingRect(c)
+                    if bw <= 0 or bh <= 0:
+                        return -1.0e9
+                    area_frac = area / float(max(1, w1 * h1))
+                    if area_frac < 0.0012 or area_frac > 0.70:
+                        return -1.0e9
+                    rect = cv2.minAreaRect(c)
+                    rw, rh = rect[1]
+                    elong = max(rw, rh) / max(1.0, min(rw, rh))
+                    fill = area / float(max(1, bw * bh))
+                    cx = x + 0.5 * bw
+                    cy = y + 0.5 * bh
+                    center = math.hypot(cx - 0.5 * w1, cy - 0.5 * h1) / max(w1, h1)
+                    border_touch = x <= 1 or y <= 1 or (x + bw) >= (w1 - 1) or (y + bh) >= (h1 - 1)
+                    return 2.4 * elong + 0.7 * math.sqrt(area_frac) - 1.5 * fill - 1.1 * center - (1.6 if border_touch else 0.0)
+
+                cnt = max(cnts, key=_score_contour)
+                best_score = _score_contour(cnt)
+                if cv2.contourArea(cnt) < 0.0012 * (w1 * h1):
+                    return None
+                x, y, bw, bh = cv2.boundingRect(cnt)
+                pad = 8
+                x0 = max(0, x - pad)
+                y0 = max(0, y - pad)
+                x1 = min(w1, x + bw + pad)
+                y1 = min(h1, y + bh + pad)
+                return src_in[y0:y1, x0:x1], mask[y0:y1, x0:x1], cnt, float(best_score)
+
+            picked = _extract_from(src)
+            # Screenshot card detection can occasionally over-crop; keep a raw
+            # full-image path and take whichever contour score is stronger.
+            if src.shape != img.shape:
+                raw_pick = _extract_from(img)
+                if raw_pick is not None and (picked is None or raw_pick[3] > picked[3] + 0.15):
+                    picked = raw_pick
+            if picked is None:
+                return None
+            return picked[0], picked[1], picked[2]
+
+        extracted = _extract_subject(img)
+        if extracted is None:
             return _fallback_from_size()
-        cnt = max(contours, key=cv2.contourArea)
-        if cv2.contourArea(cnt) < 0.01 * (w * h):
-            return _fallback_from_size()
+        crop, crop_mask, cnt = extracted
 
-        x, y, bw, bh = cv2.boundingRect(cnt)
-        pad = 8
-        x0 = max(0, x - pad)
-        y0 = max(0, y - pad)
-        x1 = min(w, x + bw + pad)
-        y1 = min(h, y + bh + pad)
-        crop = img[y0:y1, x0:x1]
-        crop_mask = mask[y0:y1, x0:x1]
-
-        # Rotate so primary axis is horizontal.
         pts = cv2.findNonZero(crop_mask)
         if pts is None:
             return _fallback_from_size()
         rect = cv2.minAreaRect(pts)
-        (rw, rh) = rect[1]
-        angle = rect[2]
-        if rw < rh:
-            angle += 90.0
+        rw, rh = rect[1]
+        angle = rect[2] + (90.0 if rw < rh else 0.0)
         M = cv2.getRotationMatrix2D((crop.shape[1] / 2, crop.shape[0] / 2), angle, 1.0)
         rot = cv2.warpAffine(crop, M, (crop.shape[1], crop.shape[0]), flags=cv2.INTER_LINEAR, borderValue=(0, 0, 0))
         rot_mask = cv2.warpAffine(crop_mask, M, (crop.shape[1], crop.shape[0]), flags=cv2.INTER_NEAREST, borderValue=0)
@@ -467,113 +673,483 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         rot = rot[y2 : y2 + bh2, x2 : x2 + bw2]
         rot_mask = rot_mask[y2 : y2 + bh2, x2 : x2 + bw2]
 
-        # Width profile along length axis.
-        prof = (rot_mask > 0).sum(axis=0).astype(np.float32)
-        if prof.size < 18:
+        raw_prof = (rot_mask > 0).sum(axis=0).astype(np.float32)
+        if raw_prof.size < 24:
             return _fallback_from_size()
-        kernel = np.ones(9, dtype=np.float32) / 9.0
-        prof = np.convolve(prof, kernel, mode="same")
+        prof = np.convolve(raw_prof, np.ones(9, dtype=np.float32) / 9.0, mode="same")
         n = prof.size
-        left_mean = float(np.mean(prof[: max(3, n // 10)]))
-        right_mean = float(np.mean(prof[-max(3, n // 10) :]))
-        head_left = left_mean >= right_mean
+
+        edge_span = max(4, n // 9)
+        left_peak = float(np.max(prof[:edge_span]))
+        right_peak = float(np.max(prof[-edge_span:]))
+        left_mean = float(np.mean(prof[:edge_span]))
+        right_mean = float(np.mean(prof[-edge_span:]))
+        head_left = (left_peak + 0.2 * left_mean) >= (right_peak + 0.2 * right_mean)
+
         shaft_slice = prof[int(0.30 * n) : int(0.70 * n)]
-        shaft_w = float(np.median(shaft_slice[shaft_slice > 0])) if np.any(shaft_slice > 0) else float(np.median(prof))
+        shaft_pos = shaft_slice[shaft_slice > 0]
+        shaft_w = float(np.median(shaft_pos)) if shaft_pos.size > 0 else float(np.median(prof))
         shaft_w = max(shaft_w, 1.0)
 
-        # Pointed tip detection: tip end quickly tapers close to zero.
-        tip_arr = prof[-max(3, n // 30) :] if head_left else prof[: max(3, n // 30)]
-        tip_ratio = float(np.mean(tip_arr)) / shaft_w
-        pointed_tip = tip_ratio < 0.28
-        fastener_type = "screw" if pointed_tip else "bolt"
+        tail_arr = prof[-max(4, n // 22) :] if head_left else prof[: max(4, n // 22)]
+        tip_ratio = float(np.mean(tail_arr)) / shaft_w
+        tail_span = max(8, n // 6)
+        tail_from_shaft = prof[-tail_span:] if head_left else prof[:tail_span][::-1]
+        t0 = float(np.mean(tail_from_shaft[: max(2, tail_span // 3)]))
+        t1 = float(np.mean(tail_from_shaft[-max(2, tail_span // 3) :]))
+        tip_taper = _clamp((t0 - t1) / max(1.0, shaft_w), 0.0, 1.5)
 
-        # Head size + taper profile from head side.
         arr_head = prof if head_left else prof[::-1]
-        thr = 1.26 * shaft_w
-        head_len = 0
-        for v in arr_head:
-            if v >= thr:
-                head_len += 1
-            else:
+        thr = 1.22 * shaft_w
+        max_scan = max(8, min(int(0.45 * n), n - 1))
+        head_len = None
+        for i in range(4, max_scan):
+            local = float(np.mean(arr_head[max(0, i - 2) : i + 1]))
+            if arr_head[i] <= 1.10 * shaft_w and local <= 1.13 * shaft_w:
+                head_len = i
                 break
-        head_len = max(head_len, 1)
-        head_zone = arr_head[: max(head_len, 6)]
+        if head_len is None:
+            for i, v in enumerate(arr_head[:max_scan]):
+                if v < thr:
+                    head_len = i
+                    break
+        head_len = max(1, int(head_len) if head_len is not None else int(0.16 * n))
+        head_zone = arr_head[: max(6, head_len)]
         head_ratio = float(np.max(head_zone)) / shaft_w
+        idx_tail = min(head_zone.size - 1, max(2, int(0.65 * head_zone.size)))
+        head_drop = float(np.max(head_zone) - head_zone[idx_tail]) / shaft_w
         corr = 0.0
         if head_zone.size >= 8:
             xh = np.arange(head_zone.size, dtype=np.float32)
             corr = abs(float(np.corrcoef(xh, head_zone)[0, 1]))
-        is_flat = head_ratio > 1.40 and corr > 0.70 and (head_len / shaft_w) < 1.2
-        if is_flat:
+        head_len_ratio = head_len / shaft_w
+
+        shaft_band = raw_prof[int(0.25 * n) : int(0.90 * n)]
+        roughness = float(np.std(np.diff(shaft_band))) / shaft_w if shaft_band.size >= 12 else 0.0
+
+        rect_cnt = cv2.minAreaRect(cnt)
+        rw_cnt, rh_cnt = rect_cnt[1]
+        contour_elong = max(rw_cnt, rh_cnt) / max(1.0, min(rw_cnt, rh_cnt))
+
+        screw_score = 0.0
+        bolt_score = 0.0
+        screw_score += max(0.0, 0.57 - tip_ratio) * 2.4
+        bolt_score += max(0.0, tip_ratio - 0.58) * 1.6
+        screw_score += min(1.35, roughness * 9.5)
+        screw_score += min(0.95, max(0.0, contour_elong - 2.1) * 0.42)
+        if tip_ratio < 0.46:
+            screw_score += 0.65
+        if tip_ratio > 0.68:
+            bolt_score += 0.45
+        if roughness > 0.11:
+            screw_score += 0.35
+        if contour_elong > 3.0:
+            screw_score += 0.20
+        if tip_taper > 0.24:
+            screw_score += 0.48
+        if tip_taper < 0.08:
+            bolt_score += 0.38
+        fastener_type = "screw" if screw_score >= bolt_score else "bolt"
+        type_conf = _clamp(abs(screw_score - bolt_score) / max(1.0, screw_score + bolt_score), 0.0, 0.99)
+
+        # Countersunk/flat heads produce a stronger profile drop and taper than
+        # pan/button in side view.
+        head_taper = 0.0
+        if head_zone.size >= 8:
+            left_h = float(np.mean(head_zone[: max(2, head_zone.size // 4)]))
+            right_h = float(np.mean(head_zone[-max(2, head_zone.size // 4) :]))
+            head_taper = max(0.0, left_h - right_h) / max(1.0, shaft_w)
+
+        flat_score = 0.0
+        pan_score = 0.0
+        button_score = 0.0
+        flat_score += max(0.0, head_ratio - 1.24) * 1.6
+        flat_score += max(0.0, head_drop - 0.10) * 3.0
+        flat_score += max(0.0, head_taper - 0.10) * 2.2
+        if head_len_ratio < 1.25:
+            flat_score += 0.5
+        if corr > 0.45:
+            flat_score += 0.35
+        if contour_elong > 2.4:
+            flat_score += 0.20
+        pan_score += max(0.0, head_ratio - 1.18) * 1.3
+        pan_score += max(0.0, 1.6 - head_len_ratio) * 0.5
+        if head_drop < 0.14:
+            pan_score += 0.35
+        if head_taper < 0.07:
+            pan_score += 0.18
+        button_score += max(0.0, 1.28 - head_ratio) * 1.1
+        button_score += max(0.0, head_len_ratio - 0.9) * 0.25
+        if head_drop < 0.08:
+            button_score += 0.35
+
+        if flat_score >= pan_score and flat_score >= button_score:
             head_type = "flat"
-        elif head_ratio > 1.32:
+            head_conf = _clamp(flat_score / max(1.0, flat_score + pan_score + button_score), 0.0, 0.99)
+        elif pan_score >= button_score:
             head_type = "pan"
+            head_conf = _clamp(pan_score / max(1.0, flat_score + pan_score + button_score), 0.0, 0.99)
         else:
             head_type = "button"
+            head_conf = _clamp(button_score / max(1.0, flat_score + pan_score + button_score), 0.0, 0.99)
 
-        # Drive detection from head region (ignore companion hardware; use main piece only).
         drive_type = "no drive"
-        head_width_px = int(min(rot.shape[1], max(16, round(1.3 * head_len))))
-        if head_left:
-            head_roi = rot[:, :head_width_px]
-        else:
-            head_roi = rot[:, -head_width_px:]
+        drive_conf = 0.0
+        drive_hv = 0
+        drive_diag = 0
+        drive_verts = 0
+        drive_fine_verts = 0
+        drive_diamond = 0.0
+        drive_dir_div = 0
+        drive_lobes = 0
+        drive_solidity = 1.0
+        drive_shape_ph = 0.0
+        drive_shape_sq = 0.0
+        drive_shape_tx = 0.0
+        # Keep drive analysis tightly around the head; including too much shaft
+        # introduces thread lines that look like false drive strokes.
+        head_width_px = int(min(rot.shape[1], max(22, round(max(1.15 * head_len, 0.14 * n)))))
+        head_roi = rot[:, :head_width_px] if head_left else rot[:, -head_width_px:]
         gray = cv2.cvtColor(head_roi, cv2.COLOR_BGR2GRAY)
-        # Focus on dark recesses near center.
-        dark = (gray < np.percentile(gray, 35)).astype(np.uint8) * 255
+        clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
+        eq = clahe.apply(gray)
+        dark = (eq < np.percentile(eq, 30)).astype(np.uint8) * 255
         dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        dark = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
         cnts, _ = cv2.findContours(dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if cnts:
             hroi, wroi = dark.shape[:2]
-            cx, cy = wroi * 0.5, hroi * 0.5
-            best = None
-            best_score = -1.0
+            cx, cy = 0.5 * wroi, 0.5 * hroi
+            near_center: list[Any] = []
+            roi_diag = max(1.0, math.hypot(wroi, hroi))
             for c in cnts:
-                area = cv2.contourArea(c)
-                if area < 12:
+                area = float(cv2.contourArea(c))
+                if area < 8:
                     continue
-                M2 = cv2.moments(c)
-                if M2["m00"] <= 0:
+                m = cv2.moments(c)
+                if m["m00"] <= 0:
                     continue
-                xcc = M2["m10"] / M2["m00"]
-                ycc = M2["m01"] / M2["m00"]
-                d = math.hypot(xcc - cx, ycc - cy)
-                score = area - 0.9 * d
-                if score > best_score:
-                    best_score = score
-                    best = c
+                xcc = m["m10"] / m["m00"]
+                ycc = m["m01"] / m["m00"]
+                d_norm = math.hypot(xcc - cx, ycc - cy) / roi_diag
+                if d_norm <= 0.40:
+                    near_center.append(c)
+            best = None
+            if near_center:
+                comb = np.zeros((hroi, wroi), dtype=np.uint8)
+                cv2.drawContours(comb, near_center, -1, 255, thickness=-1)
+                comb = cv2.morphologyEx(comb, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+                ccnts, _ = cv2.findContours(comb, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if ccnts:
+                    best = max(ccnts, key=cv2.contourArea)
+            if best is None:
+                best_score = -1.0
+                for c in cnts:
+                    area = float(cv2.contourArea(c))
+                    if area < 14:
+                        continue
+                    m = cv2.moments(c)
+                    if m["m00"] <= 0:
+                        continue
+                    xcc = m["m10"] / m["m00"]
+                    ycc = m["m01"] / m["m00"]
+                    d = math.hypot(xcc - cx, ycc - cy)
+                    score = area - 0.9 * d
+                    if score > best_score:
+                        best_score = score
+                        best = c
             if best is not None:
+                best_area = float(cv2.contourArea(best))
                 peri = cv2.arcLength(best, True)
                 approx = cv2.approxPolyDP(best, 0.05 * peri, True)
+                approx_fine = cv2.approxPolyDP(best, 0.02 * peri, True)
                 verts = len(approx)
-                if 4 <= verts <= 5:
-                    drive_type = "square"
-                else:
-                    edges = cv2.Canny(gray, 70, 150)
-                    lines = cv2.HoughLinesP(edges, 1, np.pi / 180.0, threshold=20, minLineLength=10, maxLineGap=4)
-                    if lines is not None:
-                        hv = 0
-                        diag = 0
-                        for ln in lines[:, 0, :]:
-                            x1l, y1l, x2l, y2l = ln
-                            ang = abs(math.degrees(math.atan2(y2l - y1l, x2l - x1l)))
-                            ang = min(ang, 180.0 - ang)
-                            if ang < 16 or abs(ang - 90.0) < 16:
-                                hv += 1
-                            if abs(ang - 45.0) < 16:
-                                diag += 1
-                        if hv >= 2:
-                            drive_type = "phillips"
-                        elif diag >= 2:
-                            drive_type = "square"
+                drive_verts = verts
+                drive_fine_verts = len(approx_fine)
+                edges = cv2.Canny(eq, 65, 145)
+                lines = cv2.HoughLinesP(edges, 1, np.pi / 180.0, threshold=20, minLineLength=9, maxLineGap=4)
+                hv = 0
+                diag = 0
+                dir_bins: set[int] = set()
+                if lines is not None:
+                    for ln in lines[:, 0, :]:
+                        x1, y1, x2, y2 = ln
+                        ang = abs(math.degrees(math.atan2(y2 - y1, x2 - x1)))
+                        ang = min(ang, 180.0 - ang)
+                        dir_bins.add(int(ang // 15))
+                        if ang < 15 or abs(ang - 90.0) < 15:
+                            hv += 1
+                        if abs(ang - 45.0) < 16:
+                            diag += 1
+                drive_hv = hv
+                drive_diag = diag
+                drive_dir_div = len(dir_bins)
 
-        # Scale dimensions from pixel ratios to plausible metric sizes.
+                # Directional occupancy around the recess center is more stable
+                # than line-only detection under blur/perspective.
+                x, y, bw, bh = cv2.boundingRect(best)
+                cxi = int(x + 0.5 * bw)
+                cyi = int(y + 0.5 * bh)
+                xb0 = max(0, cxi - 1)
+                xb1 = min(wroi, cxi + 2)
+                yb0 = max(0, cyi - 1)
+                yb1 = min(hroi, cyi + 2)
+                v_band = dark[:, xb0:xb1]
+                h_band = dark[yb0:yb1, :]
+                v_occ = float(np.mean(np.sum(v_band > 0, axis=0))) / max(1.0, float(hroi))
+                h_occ = float(np.mean(np.sum(h_band > 0, axis=1))) / max(1.0, float(wroi))
+                cross_occ = 0.5 * (v_occ + h_occ)
+                area_ratio = best_area / max(1.0, float(hroi * wroi))
+                rect_b = cv2.minAreaRect(best)
+                rw_b, rh_b = rect_b[1]
+                box_aspect = max(rw_b, rh_b) / max(1.0, min(rw_b, rh_b))
+                ang_b = abs(float(rect_b[2]))
+                if ang_b > 90.0:
+                    ang_b = 180.0 - ang_b
+                hull = cv2.convexHull(best)
+                hull_area = float(cv2.contourArea(hull))
+                solidity = best_area / max(hull_area, 1.0)
+                drive_solidity = solidity
+                # Diamond-shaped square recesses often sit around ~45 deg.
+                diamond_bonus = 0.0
+                if 0.82 <= (1.0 / max(1.0, box_aspect) if box_aspect > 1.0 else box_aspect) <= 1.0:
+                    if 28.0 <= ang_b <= 62.0:
+                        diamond_bonus = 0.80
+                drive_diamond = diamond_bonus
+                corner_bonus = 0.24 if 4 <= verts <= 6 else 0.0
+                lobe_bonus = 0.0
+                shape_ph = 0.0
+                shape_sq = 0.0
+                shape_tx = 0.0
+                try:
+                    pts = best[:, 0, :].astype(np.float32)
+                    angs = np.arctan2(pts[:, 1] - cyi, pts[:, 0] - cxi)
+                    angs = (angs + 2.0 * np.pi) % (2.0 * np.pi)
+                    rad = np.hypot(pts[:, 0] - cxi, pts[:, 1] - cyi)
+                    n_bins = 36
+                    bins = np.floor((angs / (2.0 * np.pi)) * n_bins).astype(np.int32)
+                    ring = np.zeros(n_bins, dtype=np.float32)
+                    for bi, rv in zip(bins, rad):
+                        bi = int(max(0, min(n_bins - 1, bi)))
+                        if rv > ring[bi]:
+                            ring[bi] = float(rv)
+                    ring = np.convolve(
+                        np.r_[ring[-1], ring, ring[0]],
+                        np.array([0.25, 0.5, 0.25], dtype=np.float32),
+                        mode="same",
+                    )[1:-1]
+                    mean_ring = float(np.mean(ring)) if ring.size else 0.0
+                    lobes = 0
+                    for i in range(n_bins):
+                        a = ring[(i - 1) % n_bins]
+                        b = ring[i]
+                        c = ring[(i + 1) % n_bins]
+                        if b > a and b > c and b > (1.06 * mean_ring):
+                            lobes += 1
+                    drive_lobes = lobes
+                    if lobes >= 5:
+                        lobe_bonus = 0.32 * min(3, lobes - 4)
+                except Exception:
+                    pass
+                try:
+                    patch = dark[max(0, y) : min(hroi, y + bh), max(0, x) : min(wroi, x + bw)]
+                    if patch.size > 0:
+                        patch = cv2.resize(patch, (64, 64), interpolation=cv2.INTER_NEAREST)
+                        patch = (patch > 0).astype(np.uint8) * 255
+
+                        def _tmpl(kind: str) -> np.ndarray:
+                            t = np.zeros((64, 64), dtype=np.uint8)
+                            c = (32, 32)
+                            if kind == "ph":
+                                cv2.rectangle(t, (28, 12), (36, 52), 255, -1)
+                                cv2.rectangle(t, (12, 28), (52, 36), 255, -1)
+                            elif kind == "sq":
+                                cv2.rectangle(t, (18, 18), (46, 46), 255, -1)
+                            else:
+                                pts_star = []
+                                for i in range(12):
+                                    a = (i / 12.0) * 2.0 * math.pi - math.pi / 2.0
+                                    r = 21 if i % 2 == 0 else 11
+                                    pts_star.append([int(c[0] + r * math.cos(a)), int(c[1] + r * math.sin(a))])
+                                cv2.fillPoly(t, [np.array(pts_star, dtype=np.int32)], 255)
+                            return t
+
+                        def _corr(a: np.ndarray, b: np.ndarray) -> float:
+                            af = a.astype(np.float32).reshape(-1)
+                            bf = b.astype(np.float32).reshape(-1)
+                            af -= float(np.mean(af))
+                            bf -= float(np.mean(bf))
+                            den = float(np.linalg.norm(af) * np.linalg.norm(bf))
+                            if den <= 1e-6:
+                                return 0.0
+                            return float(np.dot(af, bf) / den)
+
+                        shape_ph = _corr(patch, _tmpl("ph"))
+                        shape_sq = _corr(patch, _tmpl("sq"))
+                        shape_tx = _corr(patch, _tmpl("tx"))
+                        drive_shape_ph = shape_ph
+                        drive_shape_sq = shape_sq
+                        drive_shape_tx = shape_tx
+                except Exception:
+                    pass
+
+                center_r = max(4, int(0.11 * min(wroi, hroi)))
+                c0x = max(0, cxi - center_r)
+                c1x = min(wroi, cxi + center_r + 1)
+                c0y = max(0, cyi - center_r)
+                c1y = min(hroi, cyi + center_r + 1)
+                center_patch = eq[c0y:c1y, c0x:c1x]
+                bg_patch = eq[max(0, c0y - center_r) : min(hroi, c1y + center_r), max(0, c0x - center_r) : min(wroi, c1x + center_r)]
+                center_dark_delta = 0.0
+                if center_patch.size > 0 and bg_patch.size > 0:
+                    center_dark_delta = float(np.mean(bg_patch) - np.mean(center_patch))
+                best_center_dist = math.hypot(cxi - cx, cyi - cy) / max(1.0, 0.5 * math.hypot(wroi, hroi))
+                has_recess = (
+                    best_center_dist < 0.62
+                    and area_ratio >= 0.003
+                    and (center_dark_delta >= 2.0 or cross_occ >= 0.05)
+                )
+                # Very low solidity (star/torx shape) is strong evidence even
+                # when the center delta is negative due to specular highlights.
+                if not has_recess and best_center_dist < 0.65 and solidity < 0.58 and area_ratio >= 0.003:
+                    has_recess = True
+                ph_score = 0.48 * hv + 1.05 * cross_occ + (0.22 if verts > 6 else 0.0)
+                sq_score = 0.82 * diag + 0.78 * area_ratio + corner_bonus + diamond_bonus
+                tx_score = (
+                    0.35 * min(hv, diag)
+                    + 0.18 * max(0, verts - 6)
+                    + 0.14 * max(0, len(approx_fine) - 7)
+                    + 1.1 * max(0.0, 0.93 - solidity)
+                    + 0.35 * area_ratio
+                    + 0.22 * max(0, len(dir_bins) - 2)
+                    + lobe_bonus
+                    + (0.25 if 0.82 <= (1.0 / max(1.0, box_aspect) if box_aspect > 1.0 else box_aspect) <= 1.0 else 0.0)
+                )
+                ph_score += 0.9 * max(0.0, shape_ph - 0.15)
+                sq_score += 0.9 * max(0.0, shape_sq - 0.15)
+                tx_score += 1.1 * max(0.0, shape_tx - 0.12)
+                if has_recess and tx_score >= 1.25 and tx_score >= max(sq_score, ph_score - 0.08):
+                    drive_type = "torx"
+                    drive_conf = _clamp(tx_score / max(3.0, ph_score + sq_score + tx_score), 0.0, 0.99)
+                elif has_recess and ph_score >= 1.30 and hv >= 3 and ph_score >= sq_score:
+                    drive_type = "phillips"
+                    drive_conf = _clamp(ph_score / max(2.8, ph_score + sq_score), 0.0, 0.99)
+                elif has_recess and sq_score >= 0.88:
+                    drive_type = "square"
+                    drive_conf = _clamp(sq_score / max(2.8, ph_score + sq_score), 0.0, 0.99)
+                else:
+                    drive_type = "no drive"
+                    drive_conf = _clamp(1.0 - max(ph_score, sq_score) / 2.5, 0.15, 0.95)
+
+        if type_conf < 0.45 and contour_elong > 2.2 and tip_ratio < 0.62:
+            fastener_type = "screw"
+            type_conf = _clamp(type_conf + 0.18, 0.0, 0.99)
+        # Template-backed drive evidence strongly favours screw over bolt.
+        if fastener_type == "bolt" and drive_type in {"phillips", "torx", "square"} and max(drive_shape_ph, drive_shape_sq, drive_shape_tx) > 0.10:
+            fastener_type = "screw"
+            type_conf = _clamp(max(type_conf, 0.55), 0.0, 0.99)
+        if head_conf < 0.55 and fastener_type == "screw" and drive_type == "phillips" and head_ratio > 1.18:
+            head_type = "flat"
+            head_conf = _clamp(head_conf + 0.18, 0.0, 0.99)
+        if type_conf < 0.40 and drive_type == "phillips":
+            fastener_type = "screw"
+            type_conf = _clamp(type_conf + 0.22, 0.0, 0.99)
+        if head_conf < 0.50 and fastener_type == "screw" and drive_type == "phillips" and head_ratio > 1.12:
+            head_type = "flat"
+            head_conf = _clamp(head_conf + 0.22, 0.0, 0.99)
+        if head_conf < 0.50 and fastener_type == "screw" and drive_type == "phillips":
+            head_type = "flat"
+            head_conf = _clamp(head_conf + 0.16, 0.0, 0.99)
+        if (
+            drive_type == "square"
+            and fastener_type == "screw"
+            and head_type != "flat"
+            and (head_conf < 0.65 or head_taper > 0.10)
+            and head_ratio > 1.16
+        ):
+            head_type = "flat"
+            head_conf = _clamp(max(head_conf, 0.58), 0.0, 0.99)
+        if drive_type == "square" and fastener_type == "screw" and head_type != "flat" and head_conf < 0.50:
+            head_type = "flat"
+            head_conf = _clamp(max(head_conf, 0.56), 0.0, 0.99)
+        if drive_type == "square" and head_type == "flat" and type_conf < 0.70:
+            fastener_type = "screw"
+            type_conf = _clamp(max(type_conf, 0.62), 0.0, 0.99)
+        if drive_type == "phillips" and drive_diag >= max(2, drive_hv) and drive_verts <= 6:
+            drive_type = "square"
+            drive_conf = _clamp(max(drive_conf, 0.58), 0.0, 0.99)
+        if drive_type == "phillips" and drive_diamond >= 0.45 and drive_verts <= 6:
+            drive_type = "square"
+            drive_conf = _clamp(max(drive_conf, 0.60), 0.0, 0.99)
+        if drive_type == "phillips" and head_type == "flat" and drive_conf < 0.78 and drive_verts <= 8:
+            drive_type = "square"
+            drive_conf = _clamp(max(drive_conf, 0.56), 0.0, 0.99)
+        if drive_type == "phillips" and drive_shape_sq > drive_shape_ph and drive_shape_sq > 0.10:
+            drive_type = "square"
+            drive_conf = _clamp(max(drive_conf, 0.58), 0.0, 0.99)
+        if drive_type == "phillips" and drive_solidity > 0.80 and drive_verts <= 5:
+            drive_type = "square"
+            drive_conf = _clamp(max(drive_conf, 0.55), 0.0, 0.99)
+        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_verts >= 8 and drive_hv >= 2 and drive_diag >= 1 and drive_hv < 25:
+            drive_type = "torx"
+            drive_conf = _clamp(max(drive_conf, 0.58), 0.0, 0.99)
+        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_dir_div >= 4 and drive_diag >= 1 and drive_hv < 25:
+            drive_type = "torx"
+            drive_conf = _clamp(max(drive_conf, 0.56), 0.0, 0.99)
+        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_fine_verts >= 8 and drive_diag >= 1 and drive_hv < 25:
+            drive_type = "torx"
+            drive_conf = _clamp(max(drive_conf, 0.57), 0.0, 0.99)
+        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_lobes >= 5:
+            drive_type = "torx"
+            drive_conf = _clamp(max(drive_conf, 0.60), 0.0, 0.99)
+        # Very low solidity (star-shaped contour) is the strongest torx signal;
+        # require >= 5 coarse vertices to avoid triangular shadow artefacts.
+        if drive_type == "phillips" and drive_solidity < 0.58 and drive_verts >= 5:
+            drive_type = "torx"
+            drive_conf = _clamp(max(drive_conf, 0.62), 0.0, 0.99)
+        # Head refinements that depend on the final drive classification.
+        if fastener_type == "screw" and drive_type in {"phillips", "square"} and head_drop > 0.08 and head_type != "flat":
+            head_type = "flat"
+            head_conf = _clamp(max(head_conf, 0.52), 0.0, 0.99)
+        if drive_type == "no drive" and tip_ratio > 0.66 and type_conf < 0.72:
+            fastener_type = "bolt"
+            type_conf = _clamp(max(type_conf, 0.64), 0.0, 0.99)
+        if fastener_type == "bolt" and drive_type == "no drive" and head_conf < 0.80:
+            head_type = "hex"
+            head_conf = _clamp(max(head_conf, 0.66), 0.0, 0.99)
+
         obj_len_px = float(n)
         rel = shaft_w / max(obj_len_px, 1.0)
-        major_cont = max(2.5, min(8.0, rel * 44.0))
-        common = [3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 8.0]
+        major_cont = _clamp(rel * 26.0, 2.2, 7.0)
+        if contour_elong > 2.8:
+            major_cont = _clamp(major_cont * 0.88, 2.0, 6.0)
+        common = [2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 8.0]
         major_d = min(common, key=lambda d: abs(d - major_cont))
-        length = max(10.0, min(80.0, major_d * (obj_len_px / shaft_w) * 0.60))
+        length = _clamp(major_d * _clamp((obj_len_px / max(shaft_w, 1.0)) * 0.62, 2.4, 8.8), 8.0, 90.0)
+        if drive_type == "no drive" and major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.3:
+            fastener_type = "bolt"
+            type_conf = _clamp(max(type_conf, 0.66), 0.0, 0.99)
+            if head_conf < 0.82:
+                head_type = "hex"
+                head_conf = _clamp(max(head_conf, 0.68), 0.0, 0.99)
+        # Only force bolt/hex/no-drive when no template evidence supports the
+        # current drive classification (avoids stripping a real phillips/torx/
+        # square on a short thick screw photographed at an angle).
+        _has_template_evidence = max(drive_shape_ph, drive_shape_sq, drive_shape_tx) > 0.10
+        if major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.3 and head_ratio > 1.22 and not _has_template_evidence:
+            fastener_type = "bolt"
+            head_type = "hex"
+            drive_type = "no drive"
+            type_conf = _clamp(max(type_conf, 0.68), 0.0, 0.99)
+            head_conf = _clamp(max(head_conf, 0.70), 0.0, 0.99)
+            drive_conf = _clamp(max(drive_conf, 0.60), 0.0, 0.99)
+        if major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.0 and drive_type == "phillips" and not _has_template_evidence:
+            fastener_type = "bolt"
+            head_type = "hex"
+            drive_type = "no drive"
+            type_conf = _clamp(max(type_conf, 0.70), 0.0, 0.99)
+            head_conf = _clamp(max(head_conf, 0.72), 0.0, 0.99)
+            drive_conf = _clamp(max(drive_conf, 0.62), 0.0, 0.99)
 
         def _coarse_pitch(d: float) -> float:
             if d <= 3.0:
@@ -589,11 +1165,11 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             return 1.50
 
         pitch = _coarse_pitch(major_d)
-        head_d = min(max(major_d * 1.35, head_ratio * major_d * 0.95), major_d * 1.58)
+        head_d = _clamp(max(major_d * 1.28, head_ratio * major_d * 0.90), major_d * 1.22, major_d * 1.62)
         head_h = head_d * (0.42 if head_type == "flat" else 0.52 if head_type == "pan" else 0.48)
         root_d = major_d * (0.84 if fastener_type == "screw" else 0.88)
-        thread_h = max(0.2, min(0.85, 0.34 * pitch))
-        thread_len = max(0.55 * length, min(0.88 * length, length - 3.0))
+        thread_h = _clamp(0.34 * pitch, 0.2, 0.85)
+        thread_len = _clamp(length * 0.74, 0.55 * length, length - 2.5)
 
         query = (
             f"{fastener_type} {head_type} {drive_type} "
@@ -610,8 +1186,8 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             f"- Major diameter: {major_d:.2f} mm\n"
             f"- Length: {length:.2f} mm\n"
             f"- Pitch: {pitch:.2f} mm\n"
-            "Single-piece focus enabled (companion hardware ignored). "
-            "Accept or provide corrections."
+            f"- Confidence (type/head/drive): {type_conf:.2f}/{head_conf:.2f}/{drive_conf:.2f}\n"
+            "Single-piece focus enabled (companion hardware ignored). Accept or provide corrections."
         )
         return query, summary
     except Exception:
@@ -1657,7 +2233,7 @@ def _build_nut_from_params(
             opt={"projectionDir": (0.7, -0.5, 0.7), "showAxes": False, "showHidden": False},
         )
         _solidify_preview_svg(preview_path)
-        preview_url = f"/downloads/{preview_path.name}"
+        preview_url = f"/downloads/{preview_path.name}?v={int(datetime.now().timestamp() * 1000)}"
     except Exception:
         preview_url = ""
 
@@ -1767,7 +2343,19 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
     stem = _unique_output_stem(
         f"{spec.fastener_type}_{spec.head.type}_{drive_tag}_d{spec.shaft.d_minor:.2f}_l{spec.shaft.L:.2f}_{th_tag}"
     )
-    screw = make_screw_from_spec(spec, include_thread_markers=False)
+    try:
+        screw = make_screw_from_spec(spec, include_thread_markers=False)
+    except (ValueError, Exception) as build_err:
+        chat.pending_question = None
+        return {
+            "status": "error",
+            "error": str(build_err),
+            "message": _bot(
+                chat,
+                f"Could not build geometry: {build_err}. Please adjust dimensions (e.g. shorten thread length or increase overall length) and try again.",
+                kind="error",
+            ),
+        }
     step_path = export_step(screw, _DOWNLOAD_DIR / f"{stem}.step")
     stl_path = export_stl(screw, _DOWNLOAD_DIR / f"{stem}.stl")
     preview_path = _DOWNLOAD_DIR / f"{stem}.svg"
@@ -1786,9 +2374,14 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
                 opt={"projectionDir": (0.25, -0.15, 1.0), "showAxes": False, "showHidden": False},
             )
         else:
-            exporters.export(screw, str(preview_path), exportType="SVG")
+            exporters.export(
+                screw,
+                str(preview_path),
+                exportType="SVG",
+                opt={"showAxes": False, "showHidden": False},
+            )
         _solidify_preview_svg(preview_path)
-        preview_url = f"/downloads/{preview_path.name}"
+        preview_url = f"/downloads/{preview_path.name}?v={int(datetime.now().timestamp() * 1000)}"
     except Exception:
         preview_url = ""
     drawing_export_path: Path | None = None
@@ -1855,7 +2448,12 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
     return {"status": "ok", "message": msg}
 
 
-def _attempt_build(chat: ChatState) -> dict[str, Any]:
+def _attempt_build(
+    chat: ChatState,
+    *,
+    use_prompt: bool = True,
+    apply_realism_checks: bool = True,
+) -> dict[str, Any]:
     def _prompt(q: str) -> str:
         if q in chat.answers:
             return chat.answers[q]
@@ -1894,7 +2492,11 @@ def _attempt_build(chat: ChatState) -> dict[str, Any]:
             }
 
     try:
-        spec = screw_spec_from_query(chat.query, prompt=_prompt)
+        spec = screw_spec_from_query(
+            chat.query,
+            prompt=(_prompt if use_prompt else None),
+            apply_realism_checks=apply_realism_checks,
+        )
     except _NeedInput as need:
         chat.pending_question = need.question
         return {
@@ -1948,6 +2550,26 @@ def upload_icon_dark() -> FileResponse:
     if not _UPLOAD_ICON_DARK.exists():
         raise HTTPException(status_code=404, detail=f"Upload icon not found at: {_UPLOAD_ICON_DARK}")
     return FileResponse(_UPLOAD_ICON_DARK)
+
+
+@app.get("/downloads/{filename:path}")
+def download_generated_file(filename: str) -> FileResponse:
+    target = (_DOWNLOAD_DIR / filename).resolve()
+    try:
+        target.relative_to(_DOWNLOAD_DIR.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid download path.") from exc
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    no_cache_headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+    if target.suffix.lower() == ".svg":
+        _solidify_preview_svg(target)
+    return FileResponse(target, headers=no_cache_headers)
 
 
 @app.get("/api/chats", response_model=list[ChatSummary])
@@ -2070,7 +2692,7 @@ def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
             chat.pending_question = None
             chat.query = chat.image_estimate_query
             chat.answers = {}
-            result = _attempt_build(chat)
+            result = _attempt_build(chat, use_prompt=False, apply_realism_checks=False)
             if (
                 result.get("status") == "ok"
                 and chat.latest_spec is not None
@@ -2110,7 +2732,7 @@ def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
         chat.pending_question = None
         chat.query = f"{chat.image_estimate_query} {content}"
         chat.answers = {}
-        result = _attempt_build(chat)
+        result = _attempt_build(chat, use_prompt=False, apply_realism_checks=False)
         if (
             result.get("status") == "ok"
             and chat.latest_spec is not None

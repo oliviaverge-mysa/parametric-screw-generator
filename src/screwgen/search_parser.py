@@ -454,7 +454,12 @@ def parse_query(text: str) -> ParsedQuery:
     )
 
 
-def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpec:
+def screw_spec_from_query(
+    text: str,
+    prompt: PromptFn | None = None,
+    *,
+    apply_realism_checks: bool = True,
+) -> ScrewSpec:
     parsed = parse_query(text)
     text_l = text.lower()
     thread_intent = ("thread" in text_l) or ("tpi" in text_l)
@@ -532,7 +537,8 @@ def screw_spec_from_query(text: str, prompt: PromptFn | None = None) -> ScrewSpe
     if parsed.head_type == "hex" and parsed.across_flats is None and parsed.head_d is not None:
         parsed.across_flats = parsed.head_d * 0.8660254
 
-    _validate_realism(parsed, prompt)
+    if apply_realism_checks:
+        _validate_realism(parsed, prompt)
     _infer_thread_defaults(parsed, thread_intent=thread_intent, prompt=prompt)
 
     shaft_length = float(parsed.length) - float(parsed.head_h)
