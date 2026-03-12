@@ -150,6 +150,14 @@ def _solidify_preview_svg(svg_path: Path) -> None:
     except Exception:
         return
 
+    # Ensure viewBox is present so the SVG scales properly inside <img> tags.
+    if "viewBox" not in text:
+        w_m = re.search(r'\bwidth="([^"]+)"', text)
+        h_m = re.search(r'\bheight="([^"]+)"', text)
+        if w_m and h_m:
+            vb = f'viewBox="0 0 {w_m.group(1)} {h_m.group(1)}"'
+            text = re.sub(r"(<svg\b)", r"\1 " + vb, text, count=1, flags=re.IGNORECASE)
+
     # Add a subtle blue-grey gradient similar to CAD viewport shading.
     if 'id="sgShade"' not in text:
         defs = (
@@ -174,7 +182,7 @@ def _solidify_preview_svg(svg_path: Path) -> None:
             x1, y1 = float(vals[-2]), float(vals[-1])
         except Exception:
             return False
-        return math.hypot(x1 - x0, y1 - y0) <= 1e-3
+        return math.hypot(x1 - x0, y1 - y0) <= 2.0
 
     def _rewrite_path(match: re.Match[str]) -> str:
         tag = match.group(0)
@@ -188,6 +196,8 @@ def _solidify_preview_svg(svg_path: Path) -> None:
         tag = re.sub(r'\sstroke="[^"]*"', "", tag, flags=re.IGNORECASE)
         tag = re.sub(r'\sstroke-width="[^"]*"', "", tag, flags=re.IGNORECASE)
         tag = re.sub(r'\sstroke-dasharray="[^"]*"', "", tag, flags=re.IGNORECASE)
+        tag = re.sub(r'\sstroke-linejoin="[^"]*"', "", tag, flags=re.IGNORECASE)
+        tag = re.sub(r'\sstroke-linecap="[^"]*"', "", tag, flags=re.IGNORECASE)
         tag = re.sub(r'\svector-effect="[^"]*"', "", tag, flags=re.IGNORECASE)
         tag = re.sub(r"<path\b", "<path", tag, count=1, flags=re.IGNORECASE)
         tag = tag.replace(
@@ -1196,8 +1206,13 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
 
 def _chat_title_for_spec(spec) -> str:
     threadish = any(isinstance(r, ThreadRegionSpec) for r in spec.regions)
-    kind = "Bolt" if spec.fastener_type == "bolt" else "Fastener"
-    return f"{spec.head.type.title()} {'Threaded ' if threadish else ''}{kind}"
+    kind = "Bolt" if spec.fastener_type == "bolt" else "Screw"
+    drive = spec.drive.type.title() if spec.drive else "No Drive"
+    head = spec.head.type.title()
+    d = spec.shaft.d_minor
+    L = spec.shaft.L
+    parts = [head, drive, f"{'Threaded ' if threadish else ''}{kind}"]
+    return f"{' '.join(parts)} ({d:.1f} x {L:.1f} mm)"
 
 
 def _write_engineering_drawing_svg(spec, output_path: Path) -> None:
@@ -2271,7 +2286,7 @@ def _build_nut_from_params(
     prefix = (message_prefix.strip() + " ") if message_prefix.strip() else ""
     msg = _bot(
         chat,
-        f"{prefix}{style_name} nut generated. Use the buttons to download STEP, STL, drawing PDF, or a ZIP bundle.",
+        f"{prefix}{style_name} nut generated.",
         kind="result",
         extra=chat.latest_files,
     )
@@ -2438,10 +2453,9 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
         "drawing_url": drawing_url,
         "bundle_url": bundle_url,
     }
-    fastener_word = "Bolt" if spec.fastener_type == "bolt" else "Fastener"
     msg = _bot(
         chat,
-        f"{fastener_word} generated. Use the buttons to download STEP, STL, drawing PDF, or a ZIP bundle.",
+        f"{chat.title} generated.",
         kind="result",
         extra=chat.latest_files,
     )

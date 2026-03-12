@@ -34,6 +34,8 @@ let contextChatTitle = "";
 let contextLibraryItemKey = null;
 let renamingChatId = null;
 let renamingChatDraft = "";
+let renamingLibraryKey = null;
+let renamingLibraryDraft = "";
 let activeView = "chat";
 let libraryItems = [];
 let libraryRefreshTimer = null;
@@ -213,7 +215,8 @@ function deriveItemName(chat, message) {
   if (typeof message.content === "string") {
     const first = message.content.split("\n")[0].trim();
     const cleaned = first
-      .replace(/\s+generated\.?$/i, "")
+      .replace(/\s*generated\.?\s*$/i, "")
+      .replace(/\.\s*use the buttons.*$/i, "")
       .replace(/^done:\s*/i, "")
       .trim();
     if (cleaned) return cleaned;
@@ -237,19 +240,37 @@ function cacheUpsert(item) {
 function renameLibraryItem(item) {
   const key = itemKey(item);
   const existing = libraryCache[key] || item;
-  const next = prompt("Rename fastener:", itemName(existing));
-  if (next === null) return;
-  const trimmed = next.trim();
+  renamingLibraryKey = key;
+  renamingLibraryDraft = itemName(existing);
+  renderLibraryGrid();
+  setTimeout(() => {
+    const input = document.querySelector(".library-rename-input");
+    if (input) { input.focus(); input.select(); }
+  }, 0);
+}
+
+function saveLibraryRename() {
+  const trimmed = (renamingLibraryDraft || "").trim();
   if (!trimmed) return;
+  const key = renamingLibraryKey;
+  if (!key) return;
+  const existing = libraryCache[key] || {};
   libraryCache[key] = {
     ...existing,
-    ...item,
     name: trimmed,
     deleted: false,
     saved_at: Date.now(),
   };
+  renamingLibraryKey = null;
+  renamingLibraryDraft = "";
   persistLibraryNames();
   queueLibraryRefresh(0);
+}
+
+function cancelLibraryRename() {
+  renamingLibraryKey = null;
+  renamingLibraryDraft = "";
+  renderLibraryGrid();
 }
 
 function showLibraryContextMenu(e, item) {
@@ -375,11 +396,31 @@ function renderLibraryGrid() {
       media.textContent = "Preview unavailable";
     }
 
-    const title = document.createElement("div");
-    title.className = "library-item-title";
-    title.textContent = itemName(item);
-    title.title = "Right-click to rename";
-    title.oncontextmenu = (e) => showLibraryContextMenu(e, item);
+    const key = itemKey(item);
+    const isRenaming = renamingLibraryKey === key;
+
+    let title;
+    if (isRenaming) {
+      title = document.createElement("div");
+      title.className = "library-item-title library-renaming";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "library-rename-input";
+      input.value = renamingLibraryDraft;
+      input.oninput = () => { renamingLibraryDraft = input.value; };
+      input.onkeydown = (e) => {
+        if (e.key === "Enter") { e.preventDefault(); saveLibraryRename(); }
+        else if (e.key === "Escape") { e.preventDefault(); cancelLibraryRename(); }
+      };
+      input.onblur = () => { saveLibraryRename(); };
+      title.appendChild(input);
+    } else {
+      title = document.createElement("div");
+      title.className = "library-item-title";
+      title.textContent = itemName(item);
+      title.title = "Click Rename or right-click to rename";
+      title.oncontextmenu = (e) => showLibraryContextMenu(e, item);
+    }
 
     const actions = document.createElement("div");
     actions.className = "library-actions";
@@ -1096,8 +1137,8 @@ if (ctxRenameLibraryBtn) {
     e.stopPropagation();
     if (!contextLibraryItemKey) return;
     const item = libraryCache[contextLibraryItemKey];
-    if (item) renameLibraryItem(item);
     if (libraryContextMenuEl) libraryContextMenuEl.hidden = true;
+    if (item) renameLibraryItem(item);
     contextLibraryItemKey = null;
   });
 }
