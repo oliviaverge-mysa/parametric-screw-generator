@@ -1,0 +1,13 @@
+services:
+  screwgen:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - screwgen-output:/app/out
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  screwgen-output:

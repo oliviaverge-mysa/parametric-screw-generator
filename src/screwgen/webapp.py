@@ -65,22 +65,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 _WEB_DIR = _ROOT / "web"
 _DOWNLOAD_DIR = _ROOT / "out" / "web"
 _DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-_CURSOR_ASSET_DIR = (
-    Path.home()
-    / ".cursor"
-    / "projects"
-    / "c-Users-hardware-parametric-screw-generator"
-    / "assets"
-)
-_LANDING_BG_OVERRIDE = _CURSOR_ASSET_DIR / (
-    "c__Users_hardware_AppData_Roaming_Cursor_User_workspaceStorage_background.png"
-)
-_UPLOAD_ICON_LIGHT = _CURSOR_ASSET_DIR / (
-    "c__Users_hardware_AppData_Roaming_Cursor_User_workspaceStorage_bfc2cdc3b2ece80366e8dec14240cc2e_images_add_photo_alternate_24dp_FFFFFF_FILL0_wght400_GRAD0_opsz24-97f9b11b-aa5e-4056-8853-73d55848759f.png"
-)
-_UPLOAD_ICON_DARK = _CURSOR_ASSET_DIR / (
-    "c__Users_hardware_AppData_Roaming_Cursor_User_workspaceStorage_bfc2cdc3b2ece80366e8dec14240cc2e_images_add_photo_alternate_24dp_000000_FILL0_wght400_GRAD0_opsz24-49373dc6-44e8-43a3-b61d-fb2650942ca8.png"
-)
+_BRAND_BG = _WEB_DIR / "brand-bg.png"
 
 app = FastAPI(title="Fastener Generator Chat")
 app.mount("/assets", StaticFiles(directory=_WEB_DIR), name="assets")
@@ -1335,7 +1320,7 @@ def _write_engineering_drawing_pdf(
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.pdfgen import canvas
 
-    author = (author_name or Path.home().name or "User").strip() or "User"
+    author = (author_name or os.getenv("DRAWING_AUTHOR", "") or "User").strip() or "User"
     screw_label = (screw_name or f"{spec.head.type.title()} {spec.fastener_type.title()}").strip()
 
     head_d = float(spec.head.d)
@@ -1919,7 +1904,7 @@ def _write_nut_drawing_pdf(
         c.setFont("Helvetica", 8.0)
         c.drawString(col_left + pad, row_top - value_drop, value)
 
-    _cell(tb_x, top_row_top, "DRAWN BY", Path.home().name[:20])
+    _cell(tb_x, top_row_top, "DRAWN BY", os.getenv("DRAWING_AUTHOR", "User")[:20])
     _cell(col1, top_row_top, "APPROVED BY", "Mysa")
     _cell(col2, top_row_top, "DATE", datetime.now().strftime("%Y-%m-%d"))
     _cell(tb_x, bot_row_top, "UNITS", "mm")
@@ -2415,7 +2400,7 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
             spec,
             drawing_pdf_path,
             screw_name=chat.title,
-            author_name=Path.home().name,
+            author_name=os.getenv("DRAWING_AUTHOR", "User"),
             iso_svg_path=iso_preview_path,
         )
         drawing_export_path = drawing_pdf_path
@@ -2538,26 +2523,9 @@ def brand_bg() -> FileResponse:
         "Pragma": "no-cache",
         "Expires": "0",
     }
-    if not _LANDING_BG_OVERRIDE.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Brand background not found at: {_LANDING_BG_OVERRIDE}",
-        )
-    return FileResponse(_LANDING_BG_OVERRIDE, headers=no_cache_headers)
-
-
-@app.get("/upload-icon-light")
-def upload_icon_light() -> FileResponse:
-    if not _UPLOAD_ICON_LIGHT.exists():
-        raise HTTPException(status_code=404, detail=f"Upload icon not found at: {_UPLOAD_ICON_LIGHT}")
-    return FileResponse(_UPLOAD_ICON_LIGHT)
-
-
-@app.get("/upload-icon-dark")
-def upload_icon_dark() -> FileResponse:
-    if not _UPLOAD_ICON_DARK.exists():
-        raise HTTPException(status_code=404, detail=f"Upload icon not found at: {_UPLOAD_ICON_DARK}")
-    return FileResponse(_UPLOAD_ICON_DARK)
+    if not _BRAND_BG.exists():
+        raise HTTPException(status_code=404, detail="Brand background not found.")
+    return FileResponse(_BRAND_BG, headers=no_cache_headers)
 
 
 @app.get("/downloads/{filename:path}")

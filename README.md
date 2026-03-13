@@ -22,28 +22,42 @@ Parametric CAD fastener generator with a chat-based web UI. Describe what you ne
 
 ## Quick Start
 
-### 1. Create environment
+### Option A — Docker (recommended)
 
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\python -m pip install -e ".[dev]"
+```bash
+docker compose up --build
 ```
 
-### 2. Run web app
+Open `http://localhost:8000`. That's it.
 
-```powershell
+### Option B — Local install
+
+```bash
+# 1. Create environment (requires Python 3.11+)
+python -m venv .venv
+# Linux/macOS
+source .venv/bin/activate
+# Windows
+.\.venv\Scripts\activate
+
+# 2. Install dependencies
+pip install -e ".[dev]"
+
+# 3. Run
 python run_web.py
 ```
 
-Or directly:
+Open `http://127.0.0.1:8000`.
 
-```powershell
-.\.venv\Scripts\python -m uvicorn screwgen.webapp:app --app-dir src --host 127.0.0.1 --port 8002
+### Configuration (optional)
+
+Copy `.env.example` to `.env` and fill in any values you want:
+
+```bash
+cp .env.example .env
 ```
 
-### 3. Open in browser
-
-Navigate to `http://127.0.0.1:8002`. The landing page lets you type a query or upload an image immediately.
+All environment variables are optional — the app works without any of them. See `.env.example` for the full list.
 
 ## How It Works
 
@@ -93,6 +107,26 @@ Generated files are written to `out/web/` with descriptive filenames:
 - `<stem>.svg` — shaded preview
 - `<stem>_drawing.pdf` — engineering drawing
 - `<stem>_bundle.zip` — all of the above
+
+## Deployment
+
+### Docker on an internal server (recommended)
+
+The easiest way to make this available to your team:
+
+```bash
+# On your server
+git clone https://github.com/oliviaverge-mysa/parametric-screw-generator.git
+cd parametric-screw-generator
+cp .env.example .env        # edit if needed
+docker compose up -d --build
+```
+
+Everyone on the network can then access it at `http://server-ip:8000`.
+
+### Cloud VM
+
+If you don't have an internal server, spin up a free-tier VM (AWS EC2 `t2.micro`, GCP `e2-micro`, or Azure `B1s`), install Docker, and follow the steps above. CadQuery is too memory-heavy for free serverless platforms like Heroku or Render.
 
 ## Limitations
 

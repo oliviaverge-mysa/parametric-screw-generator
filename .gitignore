@@ -25,6 +25,14 @@ _fix_*.py
 _reset_*.py
 _test_imgs/
 
+# Secrets / environment
+.env
+.env.local
+.env.production
+*.pem
+*.key
+!.env.example
+
 # OS / editor
 .DS_Store
 Thumbs.db
