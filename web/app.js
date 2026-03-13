@@ -81,11 +81,16 @@ function toggleTheme() {
   }
 }
 
+function capitalize(s) {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function appendOptimisticUserBubble(text) {
   const node = document.createElement("div");
   node.className = "bubble user";
   const content = document.createElement("div");
-  content.textContent = text;
+  content.textContent = capitalize(text);
   node.appendChild(content);
   messagesEl.appendChild(node);
   messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -201,24 +206,30 @@ function itemKey(item) {
   return item.step_url || item.stl_url || item.preview_url || `${item.chat_id}:${item.message_idx}`;
 }
 
+function cleanGeneratedName(raw) {
+  return (raw || "")
+    .replace(/\.\s*use the buttons.*$/i, "")
+    .replace(/\s*generated\.?\s*$/i, "")
+    .replace(/^done:\s*/i, "")
+    .trim();
+}
+
 function itemName(item) {
-  return (item.name || "Generated Fastener").trim();
+  const cleaned = cleanGeneratedName(item.name);
+  return cleaned || "Generated Fastener";
 }
 
 function recentItemName(item) {
-  const chatName = (item.chat_title || "").trim();
-  if (chatName) return chatName;
   return itemName(item);
 }
 
 function deriveItemName(chat, message) {
+  if (chat.title && chat.title !== "New Fastener") {
+    return chat.title;
+  }
   if (typeof message.content === "string") {
     const first = message.content.split("\n")[0].trim();
-    const cleaned = first
-      .replace(/\s*generated\.?\s*$/i, "")
-      .replace(/\.\s*use the buttons.*$/i, "")
-      .replace(/^done:\s*/i, "")
-      .trim();
+    const cleaned = cleanGeneratedName(first);
     if (cleaned) return cleaned;
   }
   return chat.title || "Generated Fastener";
@@ -227,10 +238,12 @@ function deriveItemName(chat, message) {
 function cacheUpsert(item) {
   const key = itemKey(item);
   const existing = libraryCache[key] || {};
+  const userRenamed = Boolean(existing.user_renamed);
   libraryCache[key] = {
     ...existing,
     ...item,
-    name: (existing.name || item.name || "Generated Fastener").trim(),
+    name: userRenamed ? existing.name : (item.name || existing.name || "Generated Fastener").trim(),
+    user_renamed: userRenamed,
     deleted: Boolean(existing.deleted),
     saved_at: Date.now(),
   };
@@ -258,6 +271,7 @@ function saveLibraryRename() {
   libraryCache[key] = {
     ...existing,
     name: trimmed,
+    user_renamed: true,
     deleted: false,
     saved_at: Date.now(),
   };
@@ -712,7 +726,7 @@ function bubble(message, idx, latestUserIdx, chat) {
     // Result text is already shown in the preview card header.
   } else {
     const content = document.createElement("div");
-    content.textContent = message.content;
+    content.textContent = message.role === "user" ? capitalize(message.content) : message.content;
     node.appendChild(content);
   }
 
@@ -735,7 +749,8 @@ function bubble(message, idx, latestUserIdx, chat) {
       /\[y\/N\]:?\s*$/i.test(chat.pending_question) ||
       /keep your value\?/i.test(chat.pending_question) ||
       /do you want a matching nut\?/i.test(chat.pending_question) ||
-      /use max threadable length/i.test(chat.pending_question)
+      /use max threadable length/i.test(chat.pending_question) ||
+      /does this look right/i.test(chat.pending_question)
     );
   const asksRoundHexChoice =
     message.role === "bot" &&

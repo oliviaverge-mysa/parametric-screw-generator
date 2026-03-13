@@ -5,21 +5,24 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "screwgen"
 version = "0.1.0"
-description = "Parametric screw generator using CadQuery/OpenCascade."
+description = "Parametric fastener generator with chat-based web UI, powered by CadQuery/OpenCascade."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "cadquery>=2.6",
-  "pytest>=9.0",
   "fastapi",
   "uvicorn",
+  "python-multipart",
   "reportlab",
   "svglib",
-  "python-multipart",
   "Pillow",
   "opencv-python-headless",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
-

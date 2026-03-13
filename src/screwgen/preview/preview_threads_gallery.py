@@ -17,7 +17,7 @@ from ..spec import ShaftSpec
 from ..threads import ThreadParams
 
 HEAD_TYPES = ["flat", "pan", "button", "hex"]
-DRIVE_TYPES = [("hex", 3), ("phillips", 4), ("torx", 6)]
+DRIVE_TYPES = [("hex", 3), ("phillips", 4), ("square", 5), ("torx", 6)]
 PITCHES = [0.8, 1.0, 1.5]
 
 BASE_HEAD_D = 8.0

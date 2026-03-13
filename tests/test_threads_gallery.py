@@ -19,15 +19,16 @@ def test_thread_gallery_smoke_count_and_valid(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ptg, "_compose_screw", _stub_compose_screw)
     solids = build_thread_gallery_solids()
-    assert len(solids) == 36
+    expected = len(ptg.HEAD_TYPES) * len(ptg.DRIVE_TYPES) * len(ptg.PITCHES)
+    assert len(solids) == expected
     comp = build_thread_gallery_compound()
     assert comp.val().isValid()
     gallery_path, section_path, count = export_thread_gallery(tmp_path)
-    assert count == 36
+    assert count == expected
     assert gallery_path.exists()
     assert section_path.exists()
     gallery_default, section_default, default_count = export_thread_gallery()
-    assert default_count == 36
+    assert default_count == expected
     assert "\\out\\galleries\\step\\" in str(gallery_default)
     assert "\\out\\galleries\\sectioned\\step\\" in str(section_default)
 

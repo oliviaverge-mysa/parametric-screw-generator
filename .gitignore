@@ -18,6 +18,13 @@ dist/
 outputs/
 out/
 
+# Temporary test scripts and images
+_test_*.py
+_debug_*.py
+_fix_*.py
+_reset_*.py
+_test_imgs/
+
 # OS / editor
 .DS_Store
 Thumbs.db

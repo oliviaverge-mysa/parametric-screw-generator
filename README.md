@@ -1,158 +1,101 @@
 # Fastener Generator
 
-Parametric CAD fastener generator with a chat-based web UI.
+Parametric CAD fastener generator with a chat-based web UI. Describe what you need in plain English (or upload a photo), and the app generates production-ready CAD files.
 
-It builds screws/bolts (and matching nuts), then exports:
-- STEP
-- STL
-- Preview SVG
-- Engineering drawing PDF
-- ZIP bundle
+## Features
 
-## What It Supports
+- **Natural language input** — type something like `flat head phillips screw M5x30` and get a fully modeled fastener
+- **Image detection** — upload a photo of a real screw/bolt and the app identifies type, head, drive, and approximate dimensions using computer vision
+- **Export formats** — STEP, STL, preview SVG, engineering drawing PDF, and a ZIP bundle containing everything
+- **Matching nut generation** — after creating a fastener, optionally generate a matching hex or square nut
+- **Fastener library** — save, rename, and manage generated fasteners in a persistent sidebar library
 
-### Fasteners
-- Head types: `flat`, `pan`, `button`, `hex`
-- Drive types: `hex`, `phillips`, `torx`, or `no drive`
-- Fastener type: `screw` or `bolt`
-  - screw: pointed tip allowed
-  - bolt: flat end enforced
+### Supported Fastener Options
 
-### Threads
-- Thread pitch/height inference when omitted
-- Single threaded length or multi-span threading
-  - example: `thread 3-9 and 14-20`
-
-### Matching Nut Flow
-- After generation, chat asks:
-  - `Do you want a matching nut?`
-  - `What style for the matching nut?`
-- Nut styles: `hex` or `square`
-- Generates matching nut exports (STEP/STL/PDF/ZIP)
-
-### Drawings
-- Main fastener engineering drawing PDF (top/side/isometric + dimensions)
-- Matching nut drawing PDF (aligned top/side views + key dimensions)
+| Category | Options |
+|----------|---------|
+| Fastener type | `screw` (pointed tip), `bolt` (flat end) |
+| Head types | `flat`, `pan`, `button`, `hex` |
+| Drive types | `hex`, `phillips`, `torx`, `square`, `no drive` |
+| Threading | Single span or multi-region (e.g. `thread 3-9 and 14-20`) |
+| Nut styles | `hex`, `square` |
 
 ## Quick Start
 
-### 1) Create environment
+### 1. Create environment
+
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\python -m pip install -e .
+.\.venv\Scripts\python -m pip install -e ".[dev]"
 ```
 
-### 2) Run web app
+### 2. Run web app
+
+```powershell
+python run_web.py
+```
+
+Or directly:
+
 ```powershell
 .\.venv\Scripts\python -m uvicorn screwgen.webapp:app --app-dir src --host 127.0.0.1 --port 8002
 ```
 
-### 3) Open in browser
-`http://127.0.0.1:8002`
+### 3. Open in browser
 
-## Usage Notes
+Navigate to `http://127.0.0.1:8002`. The landing page lets you type a query or upload an image immediately.
 
-- Free-text input is parsed for dimensions and options.
-- If details are missing, the app asks follow-up questions.
-- Option questions render as in-chat buttons (not manual typing).
-- Unrealistic dimensions trigger a confirmation prompt.
+## How It Works
 
-Example prompt:
-`pan head diameter 10 shank diameter 5 root diameter 4 length 30 pitch 1 thread length 18`
+1. Enter a plain-text description in the chat (e.g. `pan head phillips screw diameter 5 length 25`)
+2. The parser extracts dimensions, head type, drive type, and fastener type
+3. Missing values are requested via interactive button prompts
+4. Unrealistic dimensions trigger a confirmation prompt
+5. CadQuery builds the 3D geometry and exports all file formats
+6. After generation, the app offers to create a matching nut
 
-## Common Use Cases
-
-- **Quick custom screw/bolt generation** from one plain-English prompt.
-- **Interactive completion** when values are missing (buttons for screw/bolt, drive, confirmations).
-- **Partial-thread designs** using explicit thread spans (e.g., `thread 3-9 and 14-20`).
-- **Fastener realism checks** with suggestion + accept/reject flow.
-- **Matching nut creation** for generated threaded fasteners.
-- **Export-ready package** (STEP/STL/preview/drawing/ZIP) for downstream CAD work.
-
-## Test Prompts
-
-### 1) Full guided flow (buttons)
-`pan head diameter 10 shank diameter 5 root diameter 4 length 30 pitch 1 thread height 0.5 thread length 18`
-
-Expected:
-- asks screw/bolt (buttons)
-- asks drive (buttons)
-- generates fastener files
-- asks matching nut (Yes/No buttons)
-- asks nut style (Hex/Square buttons)
-
-### 2) Multi-span threading
-`button screw head diameter 10 shank diameter 5 root diameter 4 length 30 pitch 1 thread height 0.5 thread 3-9 and 14-20 torx`
-
-Expected:
-- no screw/bolt prompt (explicit screw)
-- no drive prompt (explicit torx)
-- builds with multiple threaded regions
-- matching nut flow appears after generation
-
-### 3) Bolt + no-drive explicit
-`flat bolt no drive head diameter 10 shank diameter 5 root diameter 4 length 30 pitch 1 thread height 0.5 thread length 18`
-
-Expected:
-- no screw/bolt prompt (explicit bolt)
-- no drive prompt (explicit no drive)
-- flat-ended bolt (no pointed tip)
-- matching nut flow appears
-
-### 4) Typo tolerance
-`flat bold head diameter 10 shank diameter 5 root diameter 4 lenght 30 pitch 1 thread height 0.5 thread length 18`
-
-Expected:
-- `bold` interpreted as `bolt`
-- `lenght` interpreted as `length`
-- generation still succeeds
-
-## Repository Structure
-
-```text
-src/screwgen/
-  assembly.py
-  cache.py
-  drives.py
-  export.py
-  heads.py
-  search_parser.py
-  shaft.py
-  spec.py
-  threads.py
-  webapp.py
-  preview/
-    ...
-
-web/
-  index.html
-  app.js
-  styles.css
-
-tests/
-  test_search_parser.py
-  ...
-```
+You can also upload an image of a real fastener — the CV pipeline isolates the subject, analyzes the profile, and estimates the parameters.
 
 ## Testing
 
-Run the suite:
 ```bash
 pytest
 ```
 
-Run just parser tests:
-```bash
-pytest tests/test_search_parser.py -q
+## Project Structure
+
+```
+src/screwgen/
+  spec.py            Data models (ScrewSpec, HeadSpec, DriveSpec, ShaftSpec)
+  search_parser.py   Natural language → ScrewSpec parser
+  heads.py           Head geometry (flat, pan, button, hex)
+  drives.py          Drive recess geometry (hex, phillips, torx, square)
+  shaft.py           Shaft + tip geometry
+  threads.py         External helical thread application
+  assembly.py        Assembles head + drive + shaft + threads into a fastener
+  cache.py           LRU shape cache for repeated builds
+  export.py          STEP/STL export helpers
+  webapp.py          FastAPI app, chat state machine, image detection, drawings
+  preview/           CLI scripts for generating preview galleries
+
+web/
+  index.html         Landing page + chat UI + library view
+  app.js             Frontend logic (chat, library, theme, image upload)
+  styles.css         All styling and theming
+
+tests/               Pytest suite covering parser, geometry, and assembly
 ```
 
-## Output Location
+## Output
 
-Generated files are written under:
-- `out/web/`
+Generated files are written to `out/web/` with descriptive filenames:
+- `<stem>.step` / `<stem>.stl` — CAD models
+- `<stem>.svg` — shaded preview
+- `<stem>_drawing.pdf` — engineering drawing
+- `<stem>_bundle.zip` — all of the above
 
-## Current Limitations
+## Limitations
 
-- Geometry is practical/preview oriented and not standards-certified.
-- Some extreme combinations may trigger boolean fallbacks.
-
+- Geometry is practical/preview-oriented, not standards-certified
+- Image detection works best with single-fastener photos on clean backgrounds
+- Some extreme parameter combinations may trigger boolean fallbacks in the CAD kernel

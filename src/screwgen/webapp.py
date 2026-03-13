@@ -90,7 +90,7 @@ _chats: dict[int, ChatState] = {}
 _Q_MATCH_NUT = "Do you want a matching nut?"
 _Q_MATCH_NUT_STYLE = "What style for the matching nut?"
 _Q_NUT_SHAPE = "What shape for the nut?"
-_Q_IMAGE_ESTIMATE_CONFIRM = "Use this estimated fastener spec to generate now? [y/N]"
+_Q_IMAGE_ESTIMATE_CONFIRM = "Does this look right? You can also type corrections."
 _Q_IMAGE_ESTIMATE_EDIT = "Type corrections to the estimate (for example: 'bolt, hex head, length 25, major diameter 5')."
 
 # Metric hex nut defaults (coarse series), keyed by thread major diameter (mm):
@@ -158,37 +158,9 @@ def _solidify_preview_svg(svg_path: Path) -> None:
             vb = f'viewBox="0 0 {w_m.group(1)} {h_m.group(1)}"'
             text = re.sub(r"(<svg\b)", r"\1 " + vb, text, count=1, flags=re.IGNORECASE)
 
-    # Add a subtle blue-grey gradient similar to CAD viewport shading.
-    if 'id="sgShade"' not in text:
-        defs = (
-            '<defs>'
-            '<linearGradient id="sgShade" x1="0%" y1="0%" x2="100%" y2="100%">'
-            '<stop offset="0%" stop-color="#c6dde0"/>'
-            '<stop offset="45%" stop-color="#adc4c8"/>'
-            '<stop offset="100%" stop-color="#8ea7ab"/>'
-            "</linearGradient>"
-            "</defs>"
-        )
-        text = re.sub(r"(<svg\b[^>]*>)", r"\1" + defs, text, count=1, flags=re.IGNORECASE)
-
-    def _is_closed_path(path_d: str) -> bool:
-        if "z" in path_d.lower():
-            return True
-        vals = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", path_d)
-        if len(vals) < 4:
-            return False
-        try:
-            x0, y0 = float(vals[0]), float(vals[1])
-            x1, y1 = float(vals[-2]), float(vals[-1])
-        except Exception:
-            return False
-        return math.hypot(x1 - x0, y1 - y0) <= 2.0
-
     def _rewrite_path(match: re.Match[str]) -> str:
         tag = match.group(0)
-        d_match = re.search(r'\bd="([^"]*)"', tag, flags=re.IGNORECASE)
-        is_closed = _is_closed_path(d_match.group(1)) if d_match else False
-        fill_attr = 'fill="url(#sgShade)" fill-opacity="0.90"' if is_closed else 'fill="none"'
+        fill_attr = 'fill="#b0c4cc"'
 
         # Remove inherited/raw style attributes and apply a consistent style.
         tag = re.sub(r'\sfill="[^"]*"', "", tag, flags=re.IGNORECASE)
@@ -433,17 +405,13 @@ def _estimate_query_from_image_multimodal(image_path: Path) -> tuple[str, str] |
         f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
         f"thread length {thread_len:.2f}"
     )
+    head_label = head_type.title()
+    drive_label = drive_type.replace("no drive", "No Drive").title() if drive_type != "no drive" else "None"
+    type_label = fastener_type.title()
     summary = (
-        "Estimated from image (multimodal vision model):\n"
-        f"- Type: {fastener_type}\n"
-        f"- Head: {head_type}\n"
-        f"- Drive: {drive_type}\n"
-        f"- Major diameter: {major_d:.2f} mm\n"
-        f"- Length: {length:.2f} mm\n"
-        f"- Pitch: {pitch:.2f} mm\n"
-        f"- Confidence: {conf:.2f}\n"
-        + (f"- Notes: {notes}\n" if notes else "")
-        + "Single-piece focus enabled (companion hardware ignored). Accept or provide corrections."
+        f"Here's what I see:\n"
+        f"{head_label} head, {drive_label} drive {type_label}\n"
+        f"{major_d:.1f} mm diameter, {length:.1f} mm long, {pitch:.2f} mm pitch"
     )
     return query, summary
 
@@ -483,15 +451,13 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
             f"thread length {thread_len:.2f}"
         )
+        head_label = head_type.title()
+        drive_label = drive_type.replace("no drive", "No Drive").title() if drive_type != "no drive" else "None"
+        type_label = fastener_type.title()
         summary = (
-            "Estimated from image (basic fallback):\n"
-            f"- Type: {fastener_type}\n"
-            f"- Head: {head_type}\n"
-            f"- Drive: {drive_type}\n"
-            f"- Major diameter: {major_d:.2f} mm\n"
-            f"- Length: {length:.2f} mm\n"
-            f"- Pitch: {pitch:.2f} mm\n"
-            "You can accept this or provide corrections."
+            f"Here's what I see:\n"
+            f"{head_label} head, {drive_label} drive {type_label}\n"
+            f"{major_d:.1f} mm diameter, {length:.1f} mm long, {pitch:.2f} mm pitch"
         )
         return query, summary
 
@@ -1038,7 +1004,7 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
                 ph_score += 0.9 * max(0.0, shape_ph - 0.15)
                 sq_score += 0.9 * max(0.0, shape_sq - 0.15)
                 tx_score += 1.1 * max(0.0, shape_tx - 0.12)
-                if has_recess and tx_score >= 1.25 and tx_score >= max(sq_score, ph_score - 0.08):
+                if has_recess and tx_score >= 1.25 and tx_score >= sq_score + 0.15 and tx_score >= ph_score - 0.08:
                     drive_type = "torx"
                     drive_conf = _clamp(tx_score / max(3.0, ph_score + sq_score + tx_score), 0.0, 0.99)
                 elif has_recess and ph_score >= 1.30 and hv >= 3 and ph_score >= sq_score:
@@ -1094,7 +1060,12 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         if drive_type == "phillips" and head_type == "flat" and drive_conf < 0.78 and drive_verts <= 8:
             drive_type = "square"
             drive_conf = _clamp(max(drive_conf, 0.56), 0.0, 0.99)
-        if drive_type == "phillips" and drive_shape_sq > drive_shape_ph and drive_shape_sq > 0.10:
+        if (
+            drive_type == "phillips"
+            and drive_shape_sq > drive_shape_ph
+            and drive_shape_sq > 0.10
+            and ph_score < sq_score * 6
+        ):
             drive_type = "square"
             drive_conf = _clamp(max(drive_conf, 0.58), 0.0, 0.99)
         if drive_type == "phillips" and drive_solidity > 0.80 and drive_verts <= 5:
@@ -1117,14 +1088,40 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         if drive_type == "phillips" and drive_solidity < 0.58 and drive_verts >= 5:
             drive_type = "torx"
             drive_conf = _clamp(max(drive_conf, 0.62), 0.0, 0.99)
+        # Torx → Square overrides: square recesses are more solid and have
+        # fewer vertices than torx star patterns.
+        if drive_type == "torx" and drive_solidity >= 0.72 and drive_verts <= 6:
+            drive_type = "square"
+            drive_conf = _clamp(max(drive_conf, 0.60), 0.0, 0.99)
+        if drive_type == "torx" and drive_shape_sq > drive_shape_tx and drive_shape_sq > 0.10:
+            drive_type = "square"
+            drive_conf = _clamp(max(drive_conf, 0.58), 0.0, 0.99)
+        if drive_type == "torx" and head_type == "flat" and drive_solidity >= 0.60 and drive_verts <= 8:
+            drive_type = "square"
+            drive_conf = _clamp(max(drive_conf, 0.56), 0.0, 0.99)
+        if drive_type == "torx" and drive_diamond >= 0.40 and drive_verts <= 6:
+            drive_type = "square"
+            drive_conf = _clamp(max(drive_conf, 0.62), 0.0, 0.99)
         # Head refinements that depend on the final drive classification.
-        if fastener_type == "screw" and drive_type in {"phillips", "square"} and head_drop > 0.08 and head_type != "flat":
+        if (
+            fastener_type == "screw"
+            and drive_type in {"phillips", "square"}
+            and head_type != "flat"
+            and head_drop > 0.11
+        ):
             head_type = "flat"
             head_conf = _clamp(max(head_conf, 0.52), 0.0, 0.99)
-        if drive_type == "no drive" and tip_ratio > 0.66 and type_conf < 0.72:
+        # Strong head taper means flat/countersunk — override bolt/hex.
+        if head_taper >= 0.10 and head_type != "flat":
+            head_type = "flat"
+            head_conf = _clamp(max(head_conf, 0.60), 0.0, 0.99)
+        if head_taper >= 0.10 and fastener_type == "bolt":
+            fastener_type = "screw"
+            type_conf = _clamp(max(type_conf, 0.58), 0.0, 0.99)
+        if drive_type == "no drive" and tip_ratio > 0.66 and type_conf < 0.72 and head_taper < 0.08:
             fastener_type = "bolt"
             type_conf = _clamp(max(type_conf, 0.64), 0.0, 0.99)
-        if fastener_type == "bolt" and drive_type == "no drive" and head_conf < 0.80:
+        if fastener_type == "bolt" and drive_type == "no drive" and head_conf < 0.80 and head_taper < 0.08:
             head_type = "hex"
             head_conf = _clamp(max(head_conf, 0.66), 0.0, 0.99)
 
@@ -1136,7 +1133,7 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         common = [2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 8.0]
         major_d = min(common, key=lambda d: abs(d - major_cont))
         length = _clamp(major_d * _clamp((obj_len_px / max(shaft_w, 1.0)) * 0.62, 2.4, 8.8), 8.0, 90.0)
-        if drive_type == "no drive" and major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.3:
+        if drive_type == "no drive" and major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.3 and head_taper < 0.08:
             fastener_type = "bolt"
             type_conf = _clamp(max(type_conf, 0.66), 0.0, 0.99)
             if head_conf < 0.82:
@@ -1146,14 +1143,14 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         # current drive classification (avoids stripping a real phillips/torx/
         # square on a short thick screw photographed at an angle).
         _has_template_evidence = max(drive_shape_ph, drive_shape_sq, drive_shape_tx) > 0.10
-        if major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.3 and head_ratio > 1.22 and not _has_template_evidence:
+        if major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.3 and head_ratio > 1.22 and not _has_template_evidence and head_taper < 0.08:
             fastener_type = "bolt"
             head_type = "hex"
             drive_type = "no drive"
             type_conf = _clamp(max(type_conf, 0.68), 0.0, 0.99)
             head_conf = _clamp(max(head_conf, 0.70), 0.0, 0.99)
             drive_conf = _clamp(max(drive_conf, 0.60), 0.0, 0.99)
-        if major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.0 and drive_type == "phillips" and not _has_template_evidence:
+        if major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.0 and drive_type == "phillips" and not _has_template_evidence and head_taper < 0.08:
             fastener_type = "bolt"
             head_type = "hex"
             drive_type = "no drive"
@@ -1188,16 +1185,13 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
             f"thread length {thread_len:.2f}"
         )
+        head_label = head_type.title()
+        drive_label = "None" if drive_type == "no drive" else drive_type.title()
+        type_label = fastener_type.title()
         summary = (
-            "Estimated from image (computer vision pass):\n"
-            f"- Type: {fastener_type}\n"
-            f"- Head: {head_type}\n"
-            f"- Drive: {drive_type}\n"
-            f"- Major diameter: {major_d:.2f} mm\n"
-            f"- Length: {length:.2f} mm\n"
-            f"- Pitch: {pitch:.2f} mm\n"
-            f"- Confidence (type/head/drive): {type_conf:.2f}/{head_conf:.2f}/{drive_conf:.2f}\n"
-            "Single-piece focus enabled (companion hardware ignored). Accept or provide corrections."
+            f"Here's what I see:\n"
+            f"{head_label} head, {drive_label} drive {type_label}\n"
+            f"{major_d:.1f} mm diameter, {length:.1f} mm long, {pitch:.2f} mm pitch"
         )
         return query, summary
     except Exception:

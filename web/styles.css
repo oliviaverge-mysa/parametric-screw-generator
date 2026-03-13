@@ -484,7 +484,8 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 }
 
 .composer-image-btn:hover {
-  opacity: 0.9;
+  transform: translateY(-1px);
+  background: var(--brand-ink-hover);
 }
 
 .choice-actions { display: flex; gap: 8px; margin-top: 10px; }
@@ -1816,13 +1817,16 @@ body[data-theme="dark"] #new-chat-btn {
   background: var(--brand-ink);
 }
 
-/* Composer image upload button keeps a compact button shell */
+/* Composer image upload button matches Send button */
 .composer .composer-image-btn {
-  border: 1px solid var(--ui-line) !important;
-  background: var(--ui-elevated) !important;
-  border-radius: 10px !important;
+  border: 1px solid var(--brand-ink) !important;
+  background: var(--brand-ink) !important;
+  color: #fff !important;
+  border-radius: 12px !important;
   width: 44px;
   height: 44px;
+  box-shadow: 0 6px 18px #2f456d2e;
+  transition: transform 120ms ease, background 120ms ease;
   min-width: 44px;
 }
 

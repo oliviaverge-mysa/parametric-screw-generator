@@ -61,7 +61,8 @@ def cached_make_shaft(p: ShaftParams) -> cq.Workplane:
 
 @lru_cache(maxsize=128)
 def _cached_threaded_shaft_shape(shaft_spec: ShaftSpec, p: ThreadParams) -> cq.Shape:
-    shaft = make_shaft(ShaftParams(d_minor=shaft_spec.d_minor, L=shaft_spec.L, tip_len=shaft_spec.tip_len))
+    tip_style = "flat" if shaft_spec.tip_len <= 0 else "pointed"
+    shaft = make_shaft(ShaftParams(d_minor=shaft_spec.d_minor, L=shaft_spec.L, tip_len=shaft_spec.tip_len, tip_style=tip_style))
     shaft_up = shaft.rotate((0, 0, 0), (1, 0, 0), 180)
     shaft_up = apply_external_thread(shaft_up, shaft_spec, p)
     return shaft_up.rotate((0, 0, 0), (1, 0, 0), 180).val()

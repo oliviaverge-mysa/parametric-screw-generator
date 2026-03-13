@@ -625,7 +625,7 @@ def screw_spec_from_query(
             if parsed.drive_type is None
             else DriveSpec(
                 type=parsed.drive_type,  # type: ignore[arg-type]
-                size=parsed.drive_size or 6,  # type: ignore[arg-type]
+                size=parsed.drive_size or {"hex": 3, "phillips": 4, "square": 5, "torx": 6}.get(parsed.drive_type or "", 6),  # type: ignore[arg-type]
                 fit="scale_to_head",
                 clearance=0.02,
             )
