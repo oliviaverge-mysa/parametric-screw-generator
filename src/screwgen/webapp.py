@@ -380,7 +380,14 @@ def _estimate_query_from_image_multimodal(image_path: Path) -> tuple[str, str] |
     head_h = head_d * (0.42 if head_type == "flat" else 0.52 if head_type == "pan" else 0.48)
     root_d = major_d * (0.84 if fastener_type == "screw" else 0.88)
     thread_h = max(0.2, min(0.9, 0.34 * pitch))
-    thread_len = max(0.55 * length, min(0.90 * length, length - 2.0))
+    tip_len = 0.0 if fastener_type == "bolt" else max(0.5, min(2.0, 0.12 * length))
+    shaft_len = length - head_h
+    max_threadable = shaft_len - tip_len
+    if fastener_type == "bolt":
+        std_thread = min(2.0 * major_d + 6.0, 0.45 * length)
+        thread_len = min(std_thread, max_threadable)
+    else:
+        thread_len = min(max(0.55 * length, min(0.90 * length, max_threadable)), max_threadable)
     conf = _f("confidence", 0.0, 1.0, 0.55)
     notes = str(est.get("notes", "")).strip()
     query = (
@@ -388,7 +395,7 @@ def _estimate_query_from_image_multimodal(image_path: Path) -> tuple[str, str] |
         f"head diameter {head_d:.2f} head height {head_h:.2f} "
         f"shank diameter {major_d:.2f} root diameter {root_d:.2f} "
         f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
-        f"thread length {thread_len:.2f}"
+        f"thread length {thread_len:.2f} tip length {tip_len:.2f}"
     )
     head_label = head_type.title()
     drive_label = drive_type.replace("no drive", "No Drive").title() if drive_type != "no drive" else "None"
@@ -428,13 +435,20 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         root_d = major_d * 0.84
         pitch = max(0.5, min(1.5, 0.20 * major_d))
         thread_h = max(0.2, min(0.8, 0.35 * pitch))
-        thread_len = max(0.55 * length, min(0.85 * length, length - 3.0))
+        tip_len = 0.0 if fastener_type == "bolt" else max(0.5, min(2.0, 0.12 * length))
+        shaft_len = length - head_h
+        max_threadable = shaft_len - tip_len
+        if fastener_type == "bolt":
+            std_thread = min(2.0 * major_d + 6.0, 0.45 * length)
+            thread_len = min(std_thread, max_threadable)
+        else:
+            thread_len = min(max(0.55 * length, min(0.85 * length, max_threadable)), max_threadable)
         query = (
             f"{fastener_type} {head_type} {drive_type} "
             f"head diameter {head_d:.2f} head height {head_h:.2f} "
             f"shank diameter {major_d:.2f} root diameter {root_d:.2f} "
             f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
-            f"thread length {thread_len:.2f}"
+            f"thread length {thread_len:.2f} tip length {tip_len:.2f}"
         )
         head_label = head_type.title()
         drive_label = drive_type.replace("no drive", "No Drive").title() if drive_type != "no drive" else "None"
@@ -1161,14 +1175,22 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         head_h = head_d * (0.42 if head_type == "flat" else 0.52 if head_type == "pan" else 0.48)
         root_d = major_d * (0.84 if fastener_type == "screw" else 0.88)
         thread_h = _clamp(0.34 * pitch, 0.2, 0.85)
-        thread_len = _clamp(length * 0.74, 0.55 * length, length - 2.5)
+        tip_len = 0.0 if fastener_type == "bolt" else max(0.5, min(2.0, 0.12 * length))
+        shaft_len = length - head_h
+        max_threadable = shaft_len - tip_len
+        if fastener_type == "bolt":
+            std_thread = min(2.0 * major_d + 6.0, 0.45 * length)
+            thread_len = min(std_thread, max_threadable)
+        else:
+            thread_len = _clamp(length * 0.74, 0.55 * length, max_threadable)
+            thread_len = min(thread_len, max_threadable)
 
         query = (
             f"{fastener_type} {head_type} {drive_type} "
             f"head diameter {head_d:.2f} head height {head_h:.2f} "
             f"shank diameter {major_d:.2f} root diameter {root_d:.2f} "
             f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
-            f"thread length {thread_len:.2f}"
+            f"thread length {thread_len:.2f} tip length {tip_len:.2f}"
         )
         head_label = head_type.title()
         drive_label = "None" if drive_type == "no drive" else drive_type.title()
@@ -1297,15 +1319,14 @@ def _write_engineering_drawing_svg(spec, output_path: Path) -> None:
   <line x1="{side_x:.1f}" y1="{side_y+130:.1f}" x2="{side_x+head_px+shank_px+tip_px:.1f}" y2="{side_y+130:.1f}" class="dim"/>
   <line x1="{side_x:.1f}" y1="{side_y+120:.1f}" x2="{side_x:.1f}" y2="{side_y+140:.1f}" class="dim"/>
   <line x1="{side_x+head_px+shank_px+tip_px:.1f}" y1="{side_y+120:.1f}" x2="{side_x+head_px+shank_px+tip_px:.1f}" y2="{side_y+140:.1f}" class="dim"/>
-  <text x="{side_x+180:.1f}" y="{side_y+122:.1f}" class="txt">L = {length:.2f}</text>
+  <text x="{(2*side_x + head_px + shank_px + tip_px)/2:.1f}" y="{side_y+124:.1f}" class="small" text-anchor="middle">{head_h + length:.2f}</text>
 
-  <line x1="{side_x+head_px+40:.1f}" y1="{side_y-90:.1f}" x2="{side_x+head_px+40+min(threaded_len,length):.1f}" y2="{side_y-90:.1f}" class="dim"/>
-  <text x="{side_x+head_px+44:.1f}" y="{side_y-96:.1f}" class="small">Threaded = {threaded_len:.2f}</text>
+  <line x1="{side_x+head_px:.1f}" y1="{side_y-max(head_r,shank_r)-20:.1f}" x2="{side_x+head_px+shank_px+tip_px:.1f}" y2="{side_y-max(head_r,shank_r)-20:.1f}" class="dim"/>
+  <text x="{(2*side_x + 2*head_px + shank_px + tip_px)/2:.1f}" y="{side_y-max(head_r,shank_r)-26:.1f}" class="small" text-anchor="middle">L = {length:.2f}</text>
 
-  <text x="{top_cx+top_r+20:.1f}" y="{top_cy-10:.1f}" class="txt">Head Ø = {head_d:.2f}</text>
-  <text x="{top_cx+top_r+20:.1f}" y="{top_cy+18:.1f}" class="txt">Shank Ø = {shaft_d:.2f}</text>
-  <text x="{top_cx+top_r+20:.1f}" y="{top_cy+46:.1f}" class="txt">Tip = {tip_len:.2f}</text>
-  <text x="40" y="{H-36}" class="small">Pitch = {pitch if pitch is not None else 0:.3f} | Units follow your input context.</text>
+  <text x="{top_cx+top_r+18:.1f}" y="{top_cy-4:.1f}" class="small">&#216;{head_d:.2f}</text>
+  <text x="{top_cx+top_r+18:.1f}" y="{top_cy+14:.1f}" class="small">&#216;{shaft_d:.2f} major</text>
+  <text x="40" y="{H-36}" class="small">Pitch = {pitch if pitch is not None else 0:.3f} mm</text>
 </svg>"""
     output_path.write_text(svg, encoding="utf-8")
 
@@ -1361,31 +1382,50 @@ def _write_engineering_drawing_pdf(
     c = canvas.Canvas(str(output_path), pagesize=landscape(A4))
     c.setTitle(f"{screw_label} Drawing")
 
+    _DIM_FONT = "Helvetica"
+    _DIM_SIZE = 7.5
+    _DIM_COLOR = (0.30, 0.30, 0.30)
+    _AH = 3.8  # arrowhead half-length
+
     def _dim_h(
         x1: float,
         x2: float,
         y: float,
         ext_y: float,
         label: str,
-        label_dy: float = 4.5,
+        label_dy: float = 4.0,
         label_dx: float = 0.0,
         label_align: str = "center",
         label_x: float | None = None,
     ) -> None:
-        c.line(x1, ext_y, x1, y)
-        c.line(x2, ext_y, x2, y)
+        c.setStrokeColorRGB(*_DIM_COLOR)
+        c.setLineWidth(0.6)
+        c.line(x1, ext_y, x1, y - 2)
+        c.line(x2, ext_y, x2, y - 2)
         c.line(x1, y, x2, y)
-        ah = 4
-        c.line(x1, y, x1 + ah, y + 1.4)
-        c.line(x1, y, x1 + ah, y - 1.4)
-        c.line(x2, y, x2 - ah, y + 1.4)
-        c.line(x2, y, x2 - ah, y - 1.4)
-        c.setFont("Helvetica", 8)
+        ah = _AH
+        # Arrowheads (filled triangles)
+        p1 = c.beginPath()
+        p1.moveTo(x1, y); p1.lineTo(x1 + ah, y + 1.6); p1.lineTo(x1 + ah, y - 1.6); p1.close()
+        c.setFillColorRGB(*_DIM_COLOR)
+        c.drawPath(p1, fill=1, stroke=0)
+        p2 = c.beginPath()
+        p2.moveTo(x2, y); p2.lineTo(x2 - ah, y + 1.6); p2.lineTo(x2 - ah, y - 1.6); p2.close()
+        c.drawPath(p2, fill=1, stroke=0)
+        c.setFillColorRGB(0, 0, 0)
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(1)
+        # Label
+        span = abs(x2 - x1)
+        c.setFont(_DIM_FONT, _DIM_SIZE)
+        tw = c.stringWidth(label, _DIM_FONT, _DIM_SIZE)
         if label_align == "left":
             x_txt = label_x if label_x is not None else (x1 + label_dx)
             c.drawString(x_txt, y + label_dy, label)
-        else:
+        elif span > tw + 10:
             c.drawCentredString((x1 + x2) * 0.5 + label_dx, y + label_dy, label)
+        else:
+            c.drawString(max(x1, x2) + 6 + label_dx, y + label_dy, label)
 
     def _dim_v(
         x: float,
@@ -1398,23 +1438,26 @@ def _write_engineering_drawing_pdf(
         label_mode: str = "center",
         label_x: float | None = None,
     ) -> None:
-        c.line(ext_x, y1, x, y1)
-        c.line(ext_x, y2, x, y2)
+        c.setStrokeColorRGB(*_DIM_COLOR)
+        c.setLineWidth(0.6)
+        c.line(ext_x, y1, x + 2, y1)
+        c.line(ext_x, y2, x + 2, y2)
         c.line(x, y1, x, y2)
-        ah = 4
-        c.line(x, y1, x + 1.4, y1 + ah)
-        c.line(x, y1, x - 1.4, y1 + ah)
-        c.line(x, y2, x + 1.4, y2 - ah)
-        c.line(x, y2, x - 1.4, y2 - ah)
-        c.setFont("Helvetica", 8)
-        if label_mode == "above":
-            lx = label_x if label_x is not None else (x + label_dx)
-            c.drawString(lx, y1 + 8 + label_dy, label)
-        elif label_mode == "below":
-            lx = label_x if label_x is not None else (x + label_dx)
-            c.drawString(lx, y2 - 12 + label_dy, label)
-        else:
-            c.drawString(x + label_dx, (y1 + y2) * 0.5 + label_dy, label)
+        ah = _AH
+        p1 = c.beginPath()
+        p1.moveTo(x, y2); p1.lineTo(x + 1.6, y2 - ah); p1.lineTo(x - 1.6, y2 - ah); p1.close()
+        c.setFillColorRGB(*_DIM_COLOR)
+        c.drawPath(p1, fill=1, stroke=0)
+        p2 = c.beginPath()
+        p2.moveTo(x, y1); p2.lineTo(x + 1.6, y1 + ah); p2.lineTo(x - 1.6, y1 + ah); p2.close()
+        c.drawPath(p2, fill=1, stroke=0)
+        c.setFillColorRGB(0, 0, 0)
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(1)
+        c.setFont(_DIM_FONT, _DIM_SIZE)
+        lx = label_x if label_x is not None else (x + label_dx)
+        ly = (y1 + y2) * 0.5 + label_dy
+        c.drawString(lx, ly, label)
 
     # Drafting frame with zone labels.
     frame_margin = 14
@@ -1449,24 +1492,24 @@ def _write_engineering_drawing_pdf(
         c.drawCentredString(fx + zone_band * 0.5, y + row_h * 0.5 - 2, lab)
         c.drawCentredString(ix + iw + zone_band * 0.5, y + row_h * 0.5 - 2, lab)
 
-    # Header
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(ix + 44, iy + ih - 22, "Engineering Drawing")
-    c.setFont("Helvetica", 9)
-    c.drawString(ix + 44, iy + ih - 36, f"Fastener: {screw_label}")
-    c.drawString(ix + 44, iy + ih - 49, f"Head: {spec.head.type.title()} | Drive: {drive.title()} | Units: mm")
+    # Header – part name as title, fixed near top edge.
+    header_y = iy + ih - 24
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(ix + 44, header_y, screw_label[:70])
+    c.setFont("Helvetica", 8.5)
+    c.drawString(ix + 44, header_y - 14, f"Head: {spec.head.type.title()} | Drive: {drive.title()} | Units: mm")
 
-    # Side view: landscape layout with dynamic scale to avoid view overlap.
+    # Layout: both views share one scale for proportional accuracy.
     side_x = ix + 44
-    side_y = iy + ih * 0.68
-    top_cx = ix + iw * 0.82
-    top_cy = side_y
-    base_px = min((iw * 0.60) / max(length + head_h, 1e-6), 13.5)
-    top_r = min(max(0.5 * head_d * base_px * 0.66, 15.0), 34.0)
-    side_len_max = max(120.0, (top_cx - top_r - 95.0) - side_x)
-    px_per_mm = min(side_len_max / max(length + head_h, 1e-6), 13.5)
+    side_y = iy + ih * 0.66
 
-    # Keep side-view geometry in true proportion so head height/diameter ratio is accurate.
+    dim_gap_lr = 130
+    right_pad = 60
+    total_extent_mm = max(head_h + length + head_d, 1e-6)
+    px_per_mm = min((iw - 44 - dim_gap_lr - right_pad) / total_extent_mm, 14.0)
+    px_per_mm = min(px_per_mm, (ih * 0.28) / max(0.5 * head_d, 1e-6))
+    px_per_mm = max(px_per_mm, 2.5)
+
     shank_r = 0.5 * shaft_d * px_per_mm
     head_r = 0.5 * head_d * px_per_mm
     root_r = 0.5 * root_d * px_per_mm
@@ -1476,6 +1519,14 @@ def _write_engineering_drawing_pdf(
     x_body0 = side_x + head_px
     x_tip0 = x_body0 + body_px
     x_tip_end = x_tip0 + tip_px
+
+    top_r = head_r
+    top_cx = x_tip_end + dim_gap_lr + top_r
+    _space_right = ix + iw - right_pad - (top_cx + top_r)
+    if _space_right > 30:
+        top_cx += _space_right * 0.35
+    top_cy = side_y
+    side_label_y = side_y + max(head_r, shank_r) + 24
 
     # Side-view profile.
     if spec.head.type == "flat":
@@ -1521,8 +1572,7 @@ def _write_engineering_drawing_pdf(
             c.line(x - 1.8, side_y + shank_r, x + 1.8, side_y + root_r)
         c.setLineWidth(1)
 
-    # Top view: right side and centerline aligned with side view.
-    top_r = min(max(0.5 * head_d * px_per_mm * 0.58, 14.0), 28.0)
+    # Top view: same scale as side view for proportional accuracy.
     if spec.head.type == "hex":
         pts = []
         for k in range(6):
@@ -1562,86 +1612,114 @@ def _write_engineering_drawing_pdf(
         c.rect(top_cx - s / 2.0, top_cy - s / 2.0, s, s, stroke=1, fill=0)
     c.setLineWidth(1)
 
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(side_x, side_y + head_r + 22, "SIDE VIEW")
-    c.drawString(top_cx - 24, top_cy + top_r + 18, "TOP VIEW")
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(side_x, side_label_y, "SIDE VIEW")
+    c.drawString(top_cx - 22, top_cy + top_r + 20, "TOP VIEW")
 
     overall_len = head_h + length
-    # Head-height dimension intentionally closer to the part than full-length.
+
+    # ── Adaptive dimension spacing ──
+    # Gap between successive dimension lines; grows a little for small parts
+    # so text never overlaps.
+    dim_gap = max(17.0, min(22.0, 200.0 / max(overall_len, 1.0)))
+    dim_text_size = 7.5
+    c.setFont("Helvetica", dim_text_size)
+
+    # --- BELOW view on page (lower y) – stacked outward from part ---
+    below_part = side_y - max(head_r, shank_r) - 8.0
+    dim_y_shaft = below_part - dim_gap * 0.0
+    dim_y_full  = below_part - dim_gap * 1.0
+
+    # Shaft length
     _dim_h(
-        side_x,
-        x_body0,
-        side_y - head_r - 14,
-        side_y - head_r,
-        f"Head Height = {head_h:.2f}",
-        label_dy=6.0,
-        label_align="left",
-        label_x=x_body0 + 6.0,
-    )
-    _dim_h(
-        x_body0,
-        x_tip_end,
-        side_y - head_r - 31,
-        side_y - head_r,
-        f"Shaft Length = {length:.2f}",
-        label_dy=5.5,
-        label_dx=0.0,
-    )
-    _dim_h(side_x, x_tip_end, side_y - head_r - 48, side_y - head_r, f"Full Length = {overall_len:.2f}", label_dy=5.5)
-    if spec.fastener_type != "bolt":
-        _dim_h(
-            x_tip0,
-            x_tip_end,
-            side_y - root_r - 22,
-            side_y - root_r,
-            f"Tip Length = {tip_len:.2f}",
-            label_dy=4.0,
-            label_align="left",
-            label_x=x_tip_end + 8.0,
-        )
-    _dim_h(
-        x_body0,
-        x_body0 + threaded_len * px_per_mm,
-        side_y + shank_r + 18,
-        side_y + shank_r,
-        f"Threaded = {threaded_len:.2f}",
-    )
-    _dim_v(
-        x_tip_end + 30,
-        side_y - shank_r ,
-        side_y + shank_r,
-        x_tip_end,
-        "",
-    )
-    c.setFont("Helvetica", 8)
-    c.drawString(x_tip_end + 16.0, side_y + shank_r + 10.0, f"Max Dia = {shaft_d:.2f}")
-    _dim_v(
-        x_tip_end + 84,
-        side_y - root_r,
-        side_y + root_r,
-        x_tip_end,
-        f"Root Dia = {root_d:.2f}",
-        label_mode="below",
-        label_x=x_tip_end + 88.0,
-        label_dy=0.0,
-    )
-    _dim_v(
-        top_cx + top_r + 30,
-        top_cy - top_r,
-        top_cy + top_r,
-        top_cx + top_r,
-        f"Head Dia = {head_d:.2f}",
-        label_dx=10,
-        label_dy=-2,
+        x_body0, x_tip_end,
+        dim_y_shaft, side_y - max(head_r, shank_r),
+        f"{length:.2f}",
+        label_dy=4.0,
     )
 
-    c.setFont("Helvetica", 8.5)
+    # Full (overall) length
+    _dim_h(
+        side_x, x_tip_end,
+        dim_y_full, side_y - max(head_r, shank_r),
+        f"{overall_len:.2f}",
+        label_dy=4.0,
+    )
+
+    # --- ABOVE view on page (higher y) – thread length and head height ---
+    above_part = side_y + max(head_r, shank_r) + 8.0
+
+    # Thread length
+    if threaded_len > 0:
+        thread_end_x = x_body0 + threaded_len * px_per_mm
+        _dim_h(
+            x_body0, thread_end_x,
+            above_part + dim_gap * 0.0, side_y + max(head_r, shank_r),
+            f"Thread {threaded_len:.2f}",
+            label_dy=4.0,
+        )
+
+    # Head height (above the view, separate from thread dim)
+    if head_px > 4:
+        _dim_h(
+            side_x, x_body0,
+            above_part + dim_gap * 1.2, side_y + max(head_r, shank_r),
+            f"{head_h:.2f}",
+            label_dy=4.0,
+        )
+
+    # Tip length (screws only, shown as a small break-out dim near the tip)
+    if spec.fastener_type != "bolt" and tip_px > 4:
+        _dim_h(
+            x_tip0, x_tip_end,
+            below_part + dim_gap * 0.0, side_y + root_r,
+            f"{tip_len:.2f}",
+            label_dy=4.0,
+            label_align="left",
+            label_x=x_tip_end + 6.0,
+        )
+
+    # --- RIGHT of side view: vertical dims (staggered to avoid overlap) ---
+    right_base = x_tip_end + 16.0
+    dim_x_major = right_base + 14.0
+    dim_x_root  = dim_x_major + max(46.0, dim_gap * 2.4)
+
+    _dim_v(
+        dim_x_major,
+        side_y - shank_r, side_y + shank_r,
+        x_tip_end,
+        f"\u00d8{shaft_d:.2f}",
+        label_dx=6, label_dy=5,
+    )
+
+    if abs(shaft_d - root_d) > 0.05:
+        _dim_v(
+            dim_x_root,
+            side_y - root_r, side_y + root_r,
+            x_tip_end,
+            f"\u00d8{root_d:.2f} root",
+            label_dx=6, label_dy=-12,
+        )
+
+    # --- TOP VIEW: head diameter ---
+    _dim_v(
+        top_cx + top_r + max(18.0, dim_gap),
+        top_cy - top_r, top_cy + top_r,
+        top_cx + top_r,
+        f"\u00d8{head_d:.2f}",
+        label_dx=6, label_dy=-2,
+    )
+
+    c.setFont("Helvetica", 8.0)
     spec_y = iy + 78
-    c.drawString(ix + 24, spec_y + 30, f"Shank/Shaft Diameter: {shaft_d:.2f} mm")
-    c.drawString(ix + 24, spec_y + 16, f"Threads (approx): {int(round(total_threads))}")
-    c.drawString(ix + 24, spec_y + 2, f"Pitch: {avg_pitch:.3f} mm" if avg_pitch is not None else "Pitch: N/A")
+    spec_lines = [
+        f"Major \u00d8: {shaft_d:.2f} mm   |   Root \u00d8: {root_d:.2f} mm   |   Head H: {head_h:.2f} mm",
+        f"Pitch: {avg_pitch:.3f} mm   |   Threads: ~{int(round(total_threads))}" if avg_pitch else "Pitch: N/A",
+    ]
     if pitch_values and len(set(round(v, 6) for v in pitch_values)) > 1:
-        c.drawString(ix + 10, spec_y - 12, "Note: Multiple pitch values detected across thread regions.")
+        spec_lines.append("Note: Multiple pitch values across thread regions.")
+    for i, line in enumerate(spec_lines):
+        c.drawString(ix + 24, spec_y + 20 - i * 13, line)
 
     # Precompute title block box so isometric can be placed to its left.
     tb_w = 285
@@ -1651,9 +1729,8 @@ def _write_engineering_drawing_pdf(
 
     # Isometric view: prefer actual model snapshot exported as SVG.
     iso_x = ix + iw * 0.40
-    iso_target_w = max(210.0, tb_x - iso_x - 14.0)
-    # Make isometric visibly larger while keeping the same placement.
-    iso_target_h = max(150.0, 1.9 * row_h)
+    iso_target_w = max(180.0, (tb_x - iso_x - 14.0) * 0.85)
+    iso_target_h = max(130.0, 1.6 * row_h)
     iso_y = iy + 18.0
     c.setFont("Helvetica-Bold", 9)
     c.drawString(iso_x - 86.0, iso_y + iso_target_h * 0.78, "ISOMETRIC VIEW")
@@ -2357,56 +2434,47 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
     drawing_svg_path = _DOWNLOAD_DIR / f"{stem}_drawing.svg"
     bundle_path = _DOWNLOAD_DIR / f"{stem}_bundle.zip"
     try:
-        if spec.head.type == "flat":
-            # For flat heads, flip preview orientation so the drive/head face
-            # is presented toward the viewer instead of the underside.
-            preview_model = screw.rotate((0, 0, 0), (1, 0, 0), 180)
-            exporters.export(
-                preview_model,
-                str(preview_path),
-                exportType="SVG",
-                opt={"projectionDir": (0.25, -0.15, 1.0), "showAxes": False, "showHidden": False},
-            )
-        else:
-            exporters.export(
-                screw,
-                str(preview_path),
-                exportType="SVG",
-                opt={"showAxes": False, "showHidden": False},
-            )
+        import shutil
+        iso_preview_path = _DOWNLOAD_DIR / f"{stem}_iso.svg"
+        preview_model = (
+            screw
+            .rotate((0, 0, 0), (1, 0, 0), 180)
+            .rotate((0, 0, 0), (0, 1, 0), -90)
+        )
+        catalog_dir = (-0.15, 0.35, 1.0)
+        iso_dir = (-0.15, 0.35, 1.0)
+        exporters.export(
+            preview_model,
+            str(preview_path),
+            exportType="SVG",
+            opt={"projectionDir": catalog_dir, "showAxes": False, "showHidden": False},
+        )
+        exporters.export(
+            preview_model,
+            str(iso_preview_path),
+            exportType="SVG",
+            opt={"projectionDir": iso_dir, "showAxes": False, "showHidden": False},
+        )
         _solidify_preview_svg(preview_path)
         preview_url = f"/downloads/{preview_path.name}?v={int(datetime.now().timestamp() * 1000)}"
     except Exception:
         preview_url = ""
+        iso_preview_path = None
     drawing_export_path: Path | None = None
     try:
-        iso_preview_path = _DOWNLOAD_DIR / f"{stem}_iso.svg"
-        try:
-            iso_model = screw
-            if spec.head.type != "flat":
-                # Drawing-only orientation tweak: keep flat heads as-is,
-                # rotate other heads so they appear upright in isometric view.
-                iso_model = screw.rotate((0, 0, 0), (1, 0, 0), 180)
-            exporters.export(
-                iso_model,
-                str(iso_preview_path),
-                exportType="SVG",
-                opt={"projectionDir": (-1.0, 1.0, 0.75), "showAxes": False, "showHidden": False},
-            )
-        except Exception:
-            iso_preview_path = None
-
         _write_engineering_drawing_pdf(
             spec,
             drawing_pdf_path,
             screw_name=chat.title,
             author_name=os.getenv("DRAWING_AUTHOR", "User"),
-            iso_svg_path=iso_preview_path,
+            iso_svg_path=iso_preview_path if iso_preview_path and iso_preview_path.exists() else None,
         )
         drawing_export_path = drawing_pdf_path
         drawing_url = f"/downloads/{drawing_pdf_path.name}"
-    except Exception:
-        # Fallback keeps "Download Drawing" usable even if PDF deps are missing.
+    except Exception as pdf_err:
+        import traceback
+        print(f"[DRAWING-PDF-ERROR] {pdf_err}")
+        traceback.print_exc()
         try:
             _write_engineering_drawing_svg(spec, drawing_svg_path)
             drawing_export_path = drawing_svg_path
@@ -2543,8 +2611,14 @@ def download_generated_file(filename: str) -> FileResponse:
         "Pragma": "no-cache",
         "Expires": "0",
     }
-    if target.suffix.lower() == ".svg":
+    suffix = target.suffix.lower()
+    if suffix == ".svg":
         _solidify_preview_svg(target)
+    is_download = suffix in (".pdf", ".step", ".stl", ".zip")
+    if suffix == ".svg" and "_drawing" in target.name:
+        is_download = True
+    if is_download:
+        no_cache_headers["Content-Disposition"] = f'attachment; filename="{target.name}"'
     return FileResponse(target, headers=no_cache_headers)
 
 

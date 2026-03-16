@@ -63,11 +63,14 @@ def test_screw_spec_builds_thread_regions_from_query():
     spec = screw_spec_from_query(q)
     assert spec.head.type == "flat"
     assert spec.shaft.d_minor == 3.0
-    assert len(spec.regions) == 2
+    assert len(spec.regions) == 3
     assert isinstance(spec.regions[0], SmoothRegionSpec)
+    assert spec.regions[0].length == pytest.approx(2.0)
     assert isinstance(spec.regions[1], ThreadRegionSpec)
     assert spec.regions[1].major_d == 4.0
-    assert spec.regions[1].length == pytest.approx(19.0)
+    assert spec.regions[1].length == pytest.approx(16.0)
+    assert isinstance(spec.regions[2], SmoothRegionSpec)
+    assert spec.regions[2].length == pytest.approx(3.0)
 
 
 def test_screw_spec_infers_pitch_and_thread_height_when_thread_intent_present():

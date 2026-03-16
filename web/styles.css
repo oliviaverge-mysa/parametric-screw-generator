@@ -182,7 +182,7 @@ body.landing-active #library-view {
   color: #fff;
 }
 
-.app { display: grid; grid-template-columns: 320px 1fr; min-height: 100vh; }
+.app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 100vh; }
 .app.sidebar-collapsed { grid-template-columns: 0 1fr; }
 
 .sidebar {
@@ -247,7 +247,7 @@ body.landing-active #library-view {
   border: 0;
   background: #0e1a2b;
   color: #fff;
-  border-radius: 12px;
+  border-radius: 999px;
   font-weight: 600;
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
@@ -271,7 +271,7 @@ body.landing-active #library-view {
   border: 1px solid #ffbfd0;
   background: #fff2f7;
   color: #97365b;
-  border-radius: 12px;
+  border-radius: 999px;
   padding: 9px 10px;
   cursor: pointer;
   font-weight: 600;
@@ -284,7 +284,7 @@ body.landing-active #library-view {
   z-index: 999;
   background: var(--ui-elevated);
   border: 1px solid var(--ui-line);
-  border-radius: 12px;
+  border-radius: 20px;
   box-shadow: 0 10px 24px #0f18381a;
   padding: 6px;
   display: flex;
@@ -296,7 +296,7 @@ body.landing-active #library-view {
 .chat-context-menu .danger-btn {
   width: 100%;
   text-align: left;
-  border-radius: 10px;
+  border-radius: 999px;
   padding: 8px 10px;
   transform: none !important;
   box-shadow: none !important;
@@ -339,7 +339,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 
 .chat-item {
   padding: 11px;
-  border-radius: 12px;
+  border-radius: 20px;
   border: 1px solid var(--mysa-line);
   background: #fff;
   cursor: pointer;
@@ -373,8 +373,8 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 
 .bubble {
   max-width: 78%;
-  padding: 11px 13px;
-  border-radius: 14px;
+  padding: 12px 18px;
+  border-radius: 24px;
   font-size: 13px;
   line-height: 1.45;
   position: relative;
@@ -394,7 +394,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 .chat-upload-wrap {
   width: min(360px, 100%);
   border: 1px solid var(--ui-line);
-  border-radius: 10px;
+  border-radius: 18px;
   overflow: hidden;
   background: #fff;
 }
@@ -419,7 +419,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
   border: 1px solid #c5d1eb;
   background: #f7f9ff;
   color: #284066;
-  border-radius: 8px;
+  border-radius: 999px;
   cursor: pointer;
   font-size: 12px;
   padding: 4px 9px;
@@ -430,7 +430,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 .edit-input {
   width: 100%;
   border: 1px solid #cad6f0;
-  border-radius: 10px;
+  border-radius: 999px;
   padding: 8px;
   font-family: inherit;
   font-size: 15px;
@@ -453,8 +453,8 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
   border: 1px solid #cbd7ef;
   background: #fff;
   color: #2d3e5d;
-  border-radius: 12px;
-  padding: 11px 12px;
+  border-radius: 999px;
+  padding: 11px 18px;
 }
 
 .composer input:focus {
@@ -466,7 +466,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 .composer-image-btn {
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: 50%;
   border: 1px solid var(--ui-line);
   background: var(--ui-elevated);
   color: var(--brand-ink, #2f456d);
@@ -496,7 +496,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
   margin-top: 10px;
   border: 1px solid var(--mysa-line);
   background: #fff;
-  border-radius: 14px;
+  border-radius: 22px;
   overflow: hidden;
 }
 
@@ -553,7 +553,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
   color: #36507d;
   border: 1px solid #c8d6f1;
   background: #f5f9ff;
-  border-radius: 10px;
+  border-radius: 999px;
   padding: 8px;
   font-size: 12px;
   font-weight: 600;
@@ -575,7 +575,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 
 /* Refined branded layout + fastener library */
 .app {
-  grid-template-columns: 360px 1fr;
+  grid-template-columns: var(--sidebar-w) 1fr;
   background: linear-gradient(180deg, #f6f8fe 0%, #eef3fd 100%);
 }
 
@@ -608,7 +608,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
   line-height: 1;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: 50%;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
@@ -681,7 +681,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
   border: 1px solid #c7d5f4;
   background: #ffffffbe;
   color: #233b63;
-  border-radius: 16px;
+  border-radius: 999px;
   padding: 8px 10px;
   font-weight: 600;
   cursor: pointer;
@@ -719,7 +719,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 .recent-tile {
   border: 1px solid #cfdcf6;
   background: #ffffffd9;
-  border-radius: 16px;
+  border-radius: 20px;
   padding: 8px;
   text-align: left;
   cursor: pointer;
@@ -731,7 +731,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 .recent-thumb {
   width: 50px;
   height: 50px;
-  border-radius: 12px;
+  border-radius: 16px;
   background: linear-gradient(160deg, #fff 0%, #eff4ff 100%);
   border: 1px solid #d6e2fa;
   display: flex;
@@ -766,14 +766,24 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
   border-top: 1px solid #d8e2f5;
 }
 
-.chat-item,
-.bubble,
-.composer input,
 .composer button,
 .toolbar-btn,
-#new-chat-btn,
-.danger-btn {
-  border-radius: 16px;
+.danger-btn,
+.download-btn,
+.choice-btn {
+  border-radius: 999px;
+}
+
+.composer input {
+  border-radius: 999px;
+}
+
+.chat-item {
+  border-radius: 20px;
+}
+
+.bubble {
+  border-radius: 24px;
 }
 
 .chat-toolbar {
@@ -818,10 +828,6 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
   padding: 20px 24px;
 }
 
-.bubble {
-  border-radius: 20px;
-}
-
 .composer {
   padding: 14px;
   background: #ffffffd6;
@@ -852,7 +858,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 
 .library-card {
   border: 1px solid #d4e0f8;
-  border-radius: 20px;
+  border-radius: 24px;
   background: #ffffffeb;
   box-shadow: 0 12px 28px #0f18380d;
   padding: 10px;
@@ -860,7 +866,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 
 .library-media {
   min-height: 180px;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid #d6e2fa;
   background: linear-gradient(160deg, #fff 0%, #f1f6ff 100%);
   display: flex;
@@ -886,7 +892,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 
 .library-name-row input {
   border: 1px solid #c9d8f4;
-  border-radius: 12px;
+  border-radius: 999px;
   padding: 8px 10px;
   font-family: inherit;
   font-size: 13px;
@@ -912,7 +918,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 
 .library-empty {
   border: 1px dashed #bfd0f2;
-  border-radius: 16px;
+  border-radius: 22px;
   padding: 26px;
   color: #536684;
   background: #ffffffb3;
@@ -980,7 +986,7 @@ body.landing-active .global-header {
 .global-icon-btn {
   margin: 0 10px;
   border: 1px solid var(--ui-line);
-  border-radius: 12px;
+  border-radius: 999px;
   padding: 6px 8px;
   background: var(--ui-elevated);
   color: var(--ui-text);
@@ -1109,7 +1115,7 @@ body[data-theme="dark"] .brand-wordmark-logo-dark {
 .recent-tile {
   display: block;
   padding: 6px;
-  border-radius: 14px;
+  border-radius: 18px;
   border: 1px solid var(--ui-line);
   background: var(--ui-elevated);
 }
@@ -1260,7 +1266,7 @@ body[data-theme="dark"] .brand-wordmark-logo-dark {
 }
 
 .chat-item {
-  border-radius: 14px;
+  border-radius: 20px;
   border: 1px solid var(--ui-line);
   background: var(--ui-elevated);
   color: var(--ui-text);
@@ -1275,7 +1281,7 @@ body[data-theme="dark"] .brand-wordmark-logo-dark {
   border: 1px solid var(--ui-line);
   background: #ffffff;
   color: var(--ui-text);
-  border-radius: 10px;
+  border-radius: 999px;
   padding: 7px 9px;
   font: inherit;
   box-sizing: border-box;
@@ -1299,7 +1305,7 @@ body[data-theme="dark"] .chat-rename-input {
   border: 1px solid var(--ui-line);
   background: var(--ui-elevated);
   color: var(--ui-text);
-  border-radius: 10px;
+  border-radius: 999px;
   padding: 7px 10px;
   font-size: 12px;
   font-weight: 600;
@@ -1356,7 +1362,7 @@ body[data-theme="dark"] .chat-item.active {
 
 .danger-btn.subtle {
   width: 100%;
-  border-radius: 12px;
+  border-radius: 999px;
   padding: 7px 9px;
   background: #ffe6ee;
   color: #8d2a4a;
@@ -1467,6 +1473,7 @@ body[data-theme="dark"] .messages {
   border-right: 0;
   padding-top: 0;
 }
+
 
 body[data-theme="dark"] .danger-btn.subtle {
   background: #3a1f2b;
@@ -1635,7 +1642,7 @@ body[data-theme="dark"] .result-actions {
 .library-rename-input {
   width: 100%;
   border: 1px solid var(--ui-line);
-  border-radius: 8px;
+  border-radius: 999px;
   padding: 4px 8px;
   font-size: 14px;
   font-weight: 700;
@@ -1659,7 +1666,7 @@ body[data-theme="dark"] .result-actions {
 .library-actions .toolbar-btn,
 .library-actions .download-btn,
 .library-actions .danger-btn {
-  border-radius: 12px;
+  border-radius: 999px;
   padding: 6px 8px;
   font-size: 11px;
   text-align: center;
@@ -1675,7 +1682,7 @@ body[data-theme="dark"] .result-actions {
   width: 28px;
   min-width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: 50%;
   border: 1px solid #f0bfd0;
   background: #ffeef4;
   color: #8d2a4a;
@@ -1822,12 +1829,20 @@ body[data-theme="dark"] #new-chat-btn {
   border: 1px solid var(--brand-ink) !important;
   background: var(--brand-ink) !important;
   color: #fff !important;
-  border-radius: 12px !important;
+  border-radius: 50% !important;
   width: 44px;
   height: 44px;
+  min-width: 44px;
   box-shadow: 0 6px 18px #2f456d2e;
   transition: transform 120ms ease, background 120ms ease;
-  min-width: 44px;
+}
+
+.composer .composer-image-btn svg {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  display: block;
+  color: inherit;
 }
 
 /* Keep composer controls aligned and same height */
@@ -1842,11 +1857,4 @@ body[data-theme="dark"] #new-chat-btn {
   padding: 0 16px;
 }
 
-.composer .composer-image-btn svg {
-  width: 24px;
-  min-width: 24px;
-  height: 24px;
-  display: block;
-  color: inherit;
-}
 

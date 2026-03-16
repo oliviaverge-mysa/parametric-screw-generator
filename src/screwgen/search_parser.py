@@ -550,6 +550,18 @@ def screw_spec_from_query(
     if max_threadable <= 0:
         raise ValueError("Tip length must be smaller than shaft length.")
 
+    # For bolts without an explicit thread_start, place threads at the far end
+    # of the shaft (away from the head) which is standard bolt convention.
+    _bolt_auto_start = (
+        parsed.fastener_type == "bolt"
+        and parsed.thread_start is None
+        and not parsed.thread_spans
+        and parsed.thread_length is not None
+    )
+    if _bolt_auto_start:
+        tl = min(float(parsed.thread_length), max_threadable)
+        thread_start = max(0.0, max_threadable - tl)
+
     regions = []
     if parsed.pitch is None:
         regions = [SmoothRegionSpec(length=shaft_length)]
@@ -594,7 +606,7 @@ def screw_spec_from_query(
                 else:
                     parsed.thread_length = _ask_number(prompt, "thread length")
             thread_length = float(parsed.thread_length)
-            thread_limit = shaft_length - thread_start
+            thread_limit = max_threadable - thread_start
             if thread_length > thread_limit:
                 thread_length = thread_limit
             if thread_length <= 0:

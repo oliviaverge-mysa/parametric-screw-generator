@@ -32,7 +32,10 @@ def _default_thread_height(pitch: float, d_minor: float) -> float:
     return max(0.05, min(h, 0.45 * pitch, 0.35 * d_minor))
 
 
-def _validate(shaft_spec: ShaftSpec, p: ThreadParams) -> None:
+def _validate(shaft_spec: ShaftSpec, p: ThreadParams) -> ThreadParams:
+    """Validate and return *p*, clamping thread length if it overflows the shaft."""
+    from dataclasses import replace as _replace
+
     if p.pitch <= 0:
         raise ValueError(f"pitch must be > 0, got {p.pitch!r}")
     if p.length <= 0:
@@ -58,10 +61,9 @@ def _validate(shaft_spec: ShaftSpec, p: ThreadParams) -> None:
 
     max_threadable = shaft_spec.L - shaft_spec.tip_len
     if p.start_from_head + p.length > max_threadable + 1e-9:
-        raise ValueError(
-            "start_from_head + length must be <= shaft_spec.L - shaft_spec.tip_len, "
-            f"got {p.start_from_head + p.length!r} > {max_threadable!r}"
-        )
+        clamped = max(0.1, max_threadable - p.start_from_head)
+        p = _replace(p, length=clamped)
+    return p
 
 
 def _twist_angle_deg(length: float, pitch: float, handedness: Literal["RH", "LH"]) -> float:
@@ -140,7 +142,7 @@ def apply_external_thread(core_shaft: cq.Workplane, shaft_spec: ShaftSpec, p: Th
     - attachment plane at z=0
     - shaft extends toward +Z
     """
-    _validate(shaft_spec, p)
+    p = _validate(shaft_spec, p)
     thread_height = p.thread_height if p.thread_height is not None else _default_thread_height(
         p.pitch, shaft_spec.d_minor
     )
