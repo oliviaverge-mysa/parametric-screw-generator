@@ -40,10 +40,10 @@ _HEAD_TO_SHANK_MAX = max(_HEAD_TO_SHANK)
 _ROOT_TO_SHANK_MIN = min(_ROOT_TO_SHANK)
 _ROOT_TO_SHANK_MAX = max(_ROOT_TO_SHANK)
 _HEAD_H_TO_HEAD_D_BY_TYPE = {
-    "flat": 0.50,
-    "pan": 0.45,
-    "button": 0.38,
-    "hex": 0.62,
+    "flat": 0.30,
+    "pan": 0.40,
+    "button": 0.30,
+    "hex": 0.42,
 }
 
 
@@ -207,15 +207,20 @@ def _infer_fastener_type(text: str) -> str | None:
 
 
 def _infer_drive(text: str) -> tuple[str | None, int | None]:
-    if re.search(r"\b(torx|star drive)\b", text):
-        return "torx", 6
-    if re.search(r"\b(phillips|philips|cross[- ]head)\b", text):
-        return "phillips", 4
-    if re.search(r"\b(square drive|robertson|square recess)\b", text):
-        return "square", 5
-    if re.search(r"\b(hex drive|allen|hex socket|socket head)\b", text):
-        return "hex", 3
-    return None, None
+    _DRIVE_PATTERNS: list[tuple[str, str, int]] = [
+        (r"\b(torx|star drive)\b", "torx", 6),
+        (r"\b(phillips|philips|cross[- ]head)\b", "phillips", 4),
+        (r"\b(square drive|robertson|square recess)\b", "square", 5),
+        (r"\b(hex drive|allen|hex socket|socket head)\b", "hex", 3),
+    ]
+    best: tuple[str | None, int | None] = (None, None)
+    best_pos = -1
+    for pat, dtype, dsize in _DRIVE_PATTERNS:
+        for m in re.finditer(pat, text):
+            if m.start() > best_pos:
+                best_pos = m.start()
+                best = (dtype, dsize)
+    return best
 
 
 def _has_explicit_no_drive(text: str) -> bool:
@@ -405,10 +410,12 @@ def _infer_thread_defaults(parsed: ParsedQuery, thread_intent: bool, prompt: Pro
 def parse_query(text: str) -> ParsedQuery:
     t = _normalize_typos(text.lower().replace(",", " "))
     head_type = None
+    head_type_pos = -1
     for candidate in ("flat", "pan", "button", "hex"):
-        if re.search(rf"\b{candidate}\b", t):
-            head_type = candidate
-            break
+        for m in re.finditer(rf"\b{candidate}\b", t):
+            if m.start() > head_type_pos:
+                head_type_pos = m.start()
+                head_type = candidate
 
     unit_is_mm = "mm" in t
     tpi = _find_labeled_value(t, ["threads per inch", "thread per inch", "tpi"])

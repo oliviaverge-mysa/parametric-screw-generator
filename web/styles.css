@@ -553,7 +553,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
   color: #36507d;
   border: 1px solid #c8d6f1;
   background: #f5f9ff;
-  border-radius: 999px;
+  border-radius: 10px;
   padding: 8px;
   font-size: 12px;
   font-weight: 600;
@@ -769,9 +769,12 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
 .composer button,
 .toolbar-btn,
 .danger-btn,
-.download-btn,
 .choice-btn {
   border-radius: 999px;
+}
+
+.download-btn {
+  border-radius: 10px;
 }
 
 .composer input {
@@ -1619,9 +1622,10 @@ body[data-theme="dark"] .result-actions {
   transform-origin: center center;
 }
 
-/* CadQuery SVGs for screws can be slightly left-biased; nudge in chat preview. */
+/* Screw previews: fill horizontal space for landscape-oriented SVGs. */
 .chat-panel .preview-canvas:not(.nut-preview) img.preview-img-colorized {
-  transform: translateX(3.5%);
+  width: 88%;
+  height: 88%;
 }
 
 .library-card {
@@ -1664,10 +1668,13 @@ body[data-theme="dark"] .result-actions {
 }
 
 .library-actions .toolbar-btn,
-.library-actions .download-btn,
-.library-actions .danger-btn {
-  border-radius: 999px;
+.library-actions .danger-btn,
+.library-actions .download-btn {
+  border-radius: 10px;
   padding: 6px 8px;
+}
+
+.library-actions .download-btn {
   font-size: 11px;
   text-align: center;
 }

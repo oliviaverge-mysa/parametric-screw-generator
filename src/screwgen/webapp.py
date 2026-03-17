@@ -128,11 +128,17 @@ def _unique_output_stem(base: str) -> str:
         i += 1
 
 
+_SOLIDIFIED_MARKER = "<!-- solidified -->"
+
+
 def _solidify_preview_svg(svg_path: Path) -> None:
     """Rewrite CadQuery SVG preview with cleaner CAD-style shading."""
     try:
         text = svg_path.read_text(encoding="utf-8")
     except Exception:
+        return
+
+    if _SOLIDIFIED_MARKER in text:
         return
 
     # Ensure viewBox is present so the SVG scales properly inside <img> tags.
@@ -221,6 +227,49 @@ def _solidify_preview_svg(svg_path: Path) -> None:
             text,
             flags=re.IGNORECASE,
         )
+
+    text += "\n" + _SOLIDIFIED_MARKER + "\n"
+
+    # Crop viewBox to tightly fit actual path content so the screw fills the frame.
+    transform_m = re.search(
+        r'scale\(\s*([^,\s]+)\s*,\s*([^)\s]+)\s*\)\s*translate\(\s*([^,\s]+)\s*,\s*([^)\s]+)\s*\)',
+        text,
+    )
+    if transform_m:
+        sx = float(transform_m.group(1))
+        sy = float(transform_m.group(2))
+        tx = float(transform_m.group(3))
+        ty = float(transform_m.group(4))
+        vp_coords: list[tuple[float, float]] = []
+        for d_match in re.finditer(r'\bd="([^"]*)"', text):
+            nums = re.findall(r'(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)', d_match.group(1))
+            for i in range(0, len(nums) - 1, 2):
+                try:
+                    mx, my = float(nums[i]), float(nums[i + 1])
+                    vp_coords.append((sx * (mx + tx), sy * (my + ty)))
+                except (ValueError, IndexError):
+                    pass
+        if len(vp_coords) >= 2:
+            xs = [c[0] for c in vp_coords]
+            ys = [c[1] for c in vp_coords]
+            pad = 12.0
+            vb_x = min(xs) - pad
+            vb_y = min(ys) - pad
+            vb_w = max(xs) - min(xs) + 2 * pad
+            vb_h = max(ys) - min(ys) + 2 * pad
+            text = re.sub(r'\bwidth="[^"]*"', "", text, count=1)
+            text = re.sub(r'\bheight="[^"]*"', "", text, count=1)
+            text = re.sub(r'\bviewBox="[^"]*"', "", text, flags=re.IGNORECASE)
+            text = re.sub(r'\s*preserveAspectRatio="[^"]*"', "", text, flags=re.IGNORECASE)
+            vb_attr = f'viewBox="{vb_x:.1f} {vb_y:.1f} {vb_w:.1f} {vb_h:.1f}"'
+            text = re.sub(
+                r"(<svg\b)",
+                r"\1 " + vb_attr + ' preserveAspectRatio="xMidYMid meet"',
+                text,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+
     try:
         svg_path.write_text(text, encoding="utf-8")
     except Exception:
@@ -376,8 +425,10 @@ def _estimate_query_from_image_multimodal(image_path: Path) -> tuple[str, str] |
     major_d = _f("major_d_mm", 2.0, 12.0, 4.0)
     length = _f("length_mm", 8.0, 120.0, 24.0)
     pitch = _f("pitch_mm", 0.35, 2.5, 0.8)
-    head_d = min(max(major_d * 1.35, major_d + 1.2), major_d * 1.65)
-    head_h = head_d * (0.42 if head_type == "flat" else 0.52 if head_type == "pan" else 0.48)
+    _hd_ratio = {"flat": 1.88, "pan": 1.90, "button": 1.80, "hex": 1.65}.get(head_type, 1.85)
+    head_d = major_d * _hd_ratio
+    _hh_ratio = {"flat": 0.30, "pan": 0.40, "button": 0.30, "hex": 0.42}.get(head_type, 0.35)
+    head_h = head_d * _hh_ratio
     root_d = major_d * (0.84 if fastener_type == "screw" else 0.88)
     thread_h = max(0.2, min(0.9, 0.34 * pitch))
     tip_len = 0.0 if fastener_type == "bolt" else max(0.5, min(2.0, 0.12 * length))
@@ -430,8 +481,10 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         head_type = "pan" if fastener_type == "screw" else "hex"
         drive_type = "phillips" if fastener_type == "screw" else "no drive"
         length = max(12.0, min(44.0, major_d * aspect * 2.0))
-        head_d = min(major_d * 1.55, major_d + 3.0)
-        head_h = head_d * (0.42 if head_type == "flat" else 0.52)
+        _hd_ratio = {"flat": 1.88, "pan": 1.90, "button": 1.80, "hex": 1.65}.get(head_type, 1.85)
+        head_d = major_d * _hd_ratio
+        _hh_ratio = {"flat": 0.30, "pan": 0.40, "button": 0.30, "hex": 0.42}.get(head_type, 0.35)
+        head_h = head_d * _hh_ratio
         root_d = major_d * 0.84
         pitch = max(0.5, min(1.5, 0.20 * major_d))
         thread_h = max(0.2, min(0.8, 0.35 * pitch))
@@ -1171,8 +1224,10 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             return 1.50
 
         pitch = _coarse_pitch(major_d)
-        head_d = _clamp(max(major_d * 1.28, head_ratio * major_d * 0.90), major_d * 1.22, major_d * 1.62)
-        head_h = head_d * (0.42 if head_type == "flat" else 0.52 if head_type == "pan" else 0.48)
+        _hd_default = {"flat": 1.88, "pan": 1.90, "button": 1.80, "hex": 1.65}.get(head_type, 1.85)
+        head_d = _clamp(max(major_d * _hd_default * 0.92, head_ratio * major_d * 0.95), major_d * 1.55, major_d * 2.15)
+        _hh_ratio = {"flat": 0.30, "pan": 0.40, "button": 0.30, "hex": 0.42}.get(head_type, 0.35)
+        head_h = head_d * _hh_ratio
         root_d = major_d * (0.84 if fastener_type == "screw" else 0.88)
         thread_h = _clamp(0.34 * pitch, 0.2, 0.85)
         tip_len = 0.0 if fastener_type == "bolt" else max(0.5, min(2.0, 0.12 * length))
@@ -2438,11 +2493,12 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
         iso_preview_path = _DOWNLOAD_DIR / f"{stem}_iso.svg"
         preview_model = (
             screw
-            .rotate((0, 0, 0), (1, 0, 0), 180)
+            .rotate((0, 0, 0), (1, 0, 0), 195)
             .rotate((0, 0, 0), (0, 1, 0), -90)
+            .rotate((0, 0, 0), (0, 0, 1), -90)
         )
-        catalog_dir = (-0.15, 0.35, 1.0)
-        iso_dir = (-0.15, 0.35, 1.0)
+        catalog_dir = (0.10, 0.30, 1.0)
+        iso_dir = (0.10, 0.30, 1.0)
         exporters.export(
             preview_model,
             str(preview_path),
