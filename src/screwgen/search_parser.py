@@ -46,6 +46,18 @@ _HEAD_H_TO_HEAD_D_BY_TYPE = {
     "hex": 0.42,
 }
 
+# ISO 261 metric coarse-thread pitches (mm).
+_METRIC_COARSE_PITCH: dict[float, float] = {
+    1: 0.25, 1.2: 0.25, 1.4: 0.30, 1.6: 0.35, 1.8: 0.35,
+    2: 0.40, 2.5: 0.45, 3: 0.50, 3.5: 0.60,
+    4: 0.70, 5: 0.80, 6: 1.00, 7: 1.00,
+    8: 1.25, 10: 1.50, 12: 1.75, 14: 2.00,
+    16: 2.00, 18: 2.50, 20: 2.50, 22: 2.50,
+    24: 3.00, 27: 3.00, 30: 3.50, 33: 3.50,
+    36: 4.00, 39: 4.00, 42: 4.50, 45: 4.50,
+    48: 5.00, 52: 5.00, 56: 5.50, 60: 5.50, 64: 6.00,
+}
+
 
 @dataclass
 class ParsedQuery:
@@ -66,6 +78,7 @@ class ParsedQuery:
     drive_type: str | None
     drive_size: int | None
     drive_explicit_none: bool
+    drive_slotted: bool
     size_number: int | None
 
 
@@ -88,6 +101,65 @@ def _find_size_number(text: str) -> int | None:
         return None
     value = int(m.group(1))
     return value if value in _SIZE_CHART else None
+
+
+def _find_metric_designation(text: str) -> tuple[float | None, float | None, float | None]:
+    """Detect ISO metric M-designation (e.g. M3, M8x1.25, M5x0.8x20).
+
+    Returns (major_d_mm, pitch_override, length_override).
+    """
+    m = re.search(r"\bm(\d+(?:\.\d+)?)", text)
+    if not m:
+        return None, None, None
+    major_d = float(m.group(1))
+    if major_d < 1 or major_d > 64:
+        return None, None, None
+
+    size_str = re.escape(m.group(1))
+    pitch_override: float | None = None
+    length_override: float | None = None
+
+    mpl = re.search(
+        r"\bm" + size_str + r"\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)",
+        text,
+    )
+    if mpl:
+        pitch_override = float(mpl.group(1))
+        length_override = float(mpl.group(2))
+    else:
+        ml = re.search(r"\bm" + size_str + r"\s*[x×]\s*(\d+(?:\.\d+)?)", text)
+        if ml:
+            val = float(ml.group(1))
+            if val >= major_d:
+                length_override = val
+            else:
+                pitch_override = val
+
+    return major_d, pitch_override, length_override
+
+
+def _apply_metric_defaults(parsed: ParsedQuery, text: str) -> None:
+    """Fill unset dimensional fields from an M-designation if present."""
+    major_d, pitch_override, length_override = _find_metric_designation(text)
+    if major_d is None:
+        return
+
+    if parsed.shank_d is None:
+        parsed.shank_d = major_d
+
+    coarse_pitch = _METRIC_COARSE_PITCH.get(major_d)
+    effective_pitch = pitch_override or coarse_pitch
+    if effective_pitch is None:
+        effective_pitch = max(0.35, 0.125 * major_d)
+
+    if parsed.pitch is None:
+        parsed.pitch = effective_pitch
+
+    if parsed.root_d is None and parsed.shank_d is not None:
+        parsed.root_d = max(0.5, parsed.shank_d - 1.0825 * effective_pitch)
+
+    if parsed.length is None and length_override is not None:
+        parsed.length = length_override
 
 
 def _find_labeled_value(text: str, labels: list[str]) -> float | None:
@@ -225,6 +297,10 @@ def _infer_drive(text: str) -> tuple[str | None, int | None]:
 
 def _has_explicit_no_drive(text: str) -> bool:
     return re.search(r"\b(no drive|without drive|plain head|no recess|no socket)\b", text) is not None
+
+
+def _detect_slotted(text: str) -> bool:
+    return re.search(r"\b(slotted|combo.?drive|combination.?drive|slot)\b", text) is not None
 
 
 def _parse_drive_answer(raw: str) -> tuple[str | None, int | None]:
@@ -425,7 +501,7 @@ def parse_query(text: str) -> ParsedQuery:
 
     drive_type, drive_size = _infer_drive(t)
 
-    return ParsedQuery(
+    parsed = ParsedQuery(
         fastener_type=_infer_fastener_type(t),
         head_type=head_type,
         head_d=_find_labeled_value(
@@ -457,8 +533,11 @@ def parse_query(text: str) -> ParsedQuery:
         drive_type=drive_type,
         drive_size=drive_size,
         drive_explicit_none=_has_explicit_no_drive(t),
+        drive_slotted=_detect_slotted(t),
         size_number=_find_size_number(t),
     )
+    _apply_metric_defaults(parsed, t)
+    return parsed
 
 
 def screw_spec_from_query(
@@ -469,7 +548,7 @@ def screw_spec_from_query(
 ) -> ScrewSpec:
     parsed = parse_query(text)
     text_l = text.lower()
-    thread_intent = ("thread" in text_l) or ("tpi" in text_l)
+    thread_intent = ("thread" in text_l) or ("tpi" in text_l) or (parsed.pitch is not None)
     _infer_with_chart_ratios(parsed, prompt)
 
     if prompt is not None:
@@ -506,6 +585,10 @@ def screw_spec_from_query(
             dt, ds = _parse_drive_answer(prompt("What kind of drive is it?"))
             parsed.drive_type = dt
             parsed.drive_size = ds
+        if parsed.drive_type is not None and not parsed.drive_slotted:
+            slot_answer = prompt("Slotted or non-slotted?").strip().lower()
+            if slot_answer in {"slotted", "slot", "yes", "y", "combo", "combination"}:
+                parsed.drive_slotted = True
         if thread_intent and parsed.pitch is None:
             _infer_thread_defaults(parsed, thread_intent=True, prompt=prompt)
         if thread_intent and parsed.pitch is None:
@@ -605,10 +688,8 @@ def screw_spec_from_query(
         else:
             if parsed.thread_length is None:
                 if prompt is None:
-                    raise ValueError(
-                        "Missing thread length. Add 'thread length' or thread spans (e.g. 3-8 and 12-20)."
-                    )
-                if _confirm(prompt, f"No thread length found. Use max threadable length ({max_threadable:.4f})?"):
+                    parsed.thread_length = max_threadable - thread_start
+                elif _confirm(prompt, f"No thread length found. Use max threadable length ({max_threadable:.4f})?"):
                     parsed.thread_length = max_threadable - thread_start
                 else:
                     parsed.thread_length = _ask_number(prompt, "thread length")
@@ -647,6 +728,7 @@ def screw_spec_from_query(
                 size=parsed.drive_size or {"hex": 3, "phillips": 4, "square": 5, "torx": 6}.get(parsed.drive_type or "", 6),  # type: ignore[arg-type]
                 fit="scale_to_head",
                 clearance=0.02,
+                slotted=parsed.drive_slotted,
             )
         ),
         shaft=ShaftSpec(

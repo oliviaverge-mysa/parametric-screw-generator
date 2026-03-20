@@ -27,6 +27,7 @@ class DriveSpec:
     depth: float | None = None
     fit: DriveFit = "max_that_fits"
     clearance: float = 0.05
+    slotted: bool = False
 
 
 @dataclass(frozen=True)

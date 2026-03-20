@@ -61,6 +61,7 @@ def _drive_params_from_spec(d: DriveSpec, head_params: HeadParams) -> DriveParam
         fit=d.fit,
         clearance=d.clearance,
         head_d=head_d,
+        slotted=d.slotted,
     )
 
 
@@ -144,14 +145,22 @@ def make_screw_from_spec(spec: ScrewSpec, include_thread_markers: bool = True) -
     # Thread math is defined in +Z shaft-local coordinates; convert in/out.
     shaft_up = shaft.rotate((0, 0, 0), (1, 0, 0), 180)
     thread_start = 0.0
+    shoulder_z = spec.shaft.L - spec.shaft.tip_len
     for region in expand_regions(spec):
         if isinstance(region, ThreadRegionSpec):
+            effective_length = region.length
+            if (
+                spec.fastener_type == "screw"
+                and spec.shaft.tip_len > 0
+                and thread_start + region.length >= shoulder_z - 0.5
+            ):
+                effective_length = spec.shaft.L - thread_start
             shaft_up = apply_external_thread(
                 shaft_up,
                 spec.shaft,
                 ThreadParams(
                     pitch=region.pitch,
-                    length=region.length,
+                    length=effective_length,
                     start_from_head=thread_start,
                     included_angle_deg=60.0,
                     major_d=region.major_d,

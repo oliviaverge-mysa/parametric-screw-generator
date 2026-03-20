@@ -59,7 +59,8 @@ def _validate(shaft_spec: ShaftSpec, p: ThreadParams) -> ThreadParams:
             "When require_explicit_profile=True, provide thread_height or major_d."
         )
 
-    max_threadable = shaft_spec.L - shaft_spec.tip_len
+    has_tip = shaft_spec.tip_len > 0
+    max_threadable = shaft_spec.L if has_tip else shaft_spec.L - 0.002
     if p.start_from_head + p.length > max_threadable + 1e-9:
         clamped = max(0.1, max_threadable - p.start_from_head)
         p = _replace(p, length=clamped)
@@ -135,6 +136,58 @@ def _build_cut_groove_solid(shaft_spec: ShaftSpec, p: ThreadParams, thread_heigh
     )
 
 
+def _taper_threads_into_tip(
+    result: cq.Workplane,
+    shaft_spec: ShaftSpec,
+    p: ThreadParams,
+    thread_height: float,
+) -> cq.Workplane:
+    """Add cone-following threads in the tip by cutting helical grooves from a solid cone."""
+    major_d = p.major_d if p.major_d is not None else shaft_spec.d_minor + 2.0 * thread_height
+    major_r = major_d / 2.0
+    minor_r = max(shaft_spec.d_minor / 2.0 + p.clearance - 0.03, 0.01)
+    shoulder_z = shaft_spec.L - shaft_spec.tip_len
+    tip_len = shaft_spec.tip_len
+
+    overlap = min(0.15, tip_len * 0.1)
+    cone_start = shoulder_z - overlap
+    cone_len = tip_len + overlap
+
+    tip_cone = (
+        cq.Workplane("XY")
+        .workplane(offset=cone_start)
+        .circle(major_r + 0.005)
+        .workplane(offset=cone_len)
+        .circle(0.005)
+        .loft()
+    )
+
+    half_w = _tri_half_width(thread_height, p.included_angle_deg)
+    groove_profile = (
+        cq.Workplane("XY")
+        .workplane(offset=cone_start)
+        .polyline(
+            [
+                (major_r + 0.02, -half_w),
+                (minor_r, 0.0),
+                (major_r + 0.02, half_w),
+            ]
+        )
+        .close()
+    )
+
+    groove_twist = _twist_angle_deg(cone_len, p.pitch, p.handedness)
+    groove = groove_profile.twistExtrude(cone_len, groove_twist, combine=False)
+
+    phase = 360.0 * (cone_start - p.start_from_head) / p.pitch + 180.0
+    if p.handedness == "LH":
+        phase = -phase
+    groove = groove.rotate((0, 0, 0), (0, 0, 1), phase)
+
+    threaded_tip = tip_cone.cut(groove)
+    return result.union(threaded_tip, clean=True)
+
+
 def apply_external_thread(core_shaft: cq.Workplane, shaft_spec: ShaftSpec, p: ThreadParams) -> cq.Workplane:
     """Apply external thread geometry on a +Z-oriented shaft.
 
@@ -142,14 +195,33 @@ def apply_external_thread(core_shaft: cq.Workplane, shaft_spec: ShaftSpec, p: Th
     - attachment plane at z=0
     - shaft extends toward +Z
     """
+    from dataclasses import replace as _replace
+
     p = _validate(shaft_spec, p)
     thread_height = p.thread_height if p.thread_height is not None else _default_thread_height(
         p.pitch, shaft_spec.d_minor
     )
 
+    thread_end = p.start_from_head + p.length
+    shoulder_z = shaft_spec.L - shaft_spec.tip_len
+    needs_tip_taper = shaft_spec.tip_len > 0 and thread_end > shoulder_z + 1e-9
+
     if p.mode == "add":
-        thread_solid = _build_add_thread_solid(shaft_spec, p, thread_height)
-        return core_shaft.union(thread_solid, clean=True).combine()
+        if needs_tip_taper:
+            cyl_length = max(0.1, shoulder_z - p.start_from_head)
+            cyl_p = _replace(p, length=cyl_length)
+            thread_solid = _build_add_thread_solid(shaft_spec, cyl_p, thread_height)
+            result = core_shaft.union(thread_solid, clean=True).combine()
+            try:
+                tapered = _taper_threads_into_tip(result, shaft_spec, p, thread_height)
+                if tapered.val().isValid() and tapered.val().Volume() > 1e-6:
+                    result = tapered
+            except Exception:
+                pass
+        else:
+            thread_solid = _build_add_thread_solid(shaft_spec, p, thread_height)
+            result = core_shaft.union(thread_solid, clean=True).combine()
+        return result
 
     # mode == "cut"
     major_d = p.major_d if p.major_d is not None else shaft_spec.d_minor + 2.0 * thread_height

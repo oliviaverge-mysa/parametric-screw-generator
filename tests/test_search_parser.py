@@ -120,7 +120,7 @@ def test_screw_spec_forces_flat_end_for_bolt():
 
 def test_screw_spec_prompts_for_drive_when_unspecified():
     q = "pan screw head diameter 8 head height 4 shank diameter 4 root diameter 3 length 22 tip length 2"
-    answers = iter(["torx"])
+    answers = iter(["torx", "non-slotted"])
 
     def prompt(question: str) -> str:
         if "Press Enter to continue" in question:
@@ -212,6 +212,60 @@ def test_prompt_accepts_mm_and_infers_head_height_from_standards():
     assert isinstance(spec.regions[0], ThreadRegionSpec)
     assert spec.regions[0].length == 4.0
     assert all("Missing head height" not in q for q in asked)
+
+
+def test_parse_query_detects_metric_m_designation():
+    parsed = parse_query("M3 pan screw 10mm long")
+    assert parsed.shank_d == 3.0
+    assert parsed.pitch == 0.5
+    assert parsed.root_d is not None
+    assert parsed.root_d < 3.0
+    assert parsed.length == 10.0
+
+
+def test_parse_query_metric_m8_with_pitch_and_length():
+    parsed = parse_query("M8x1.25x40 hex bolt")
+    assert parsed.shank_d == 8.0
+    assert parsed.pitch == 1.25
+    assert parsed.length == 40.0
+
+
+def test_parse_query_metric_m5_with_length():
+    parsed = parse_query("M5x20 pan screw phillips")
+    assert parsed.shank_d == 5.0
+    assert parsed.pitch == 0.8
+    assert parsed.length == 20.0
+
+
+def test_parse_query_metric_m4_fine_pitch():
+    parsed = parse_query("M4x0.5 screw 15mm long")
+    assert parsed.shank_d == 4.0
+    assert parsed.pitch == 0.5
+    assert parsed.length == 15.0
+
+
+def test_metric_screw_spec_builds_without_explicit_dimensions():
+    spec = screw_spec_from_query("M5 pan screw 20mm long", apply_realism_checks=False)
+    assert spec.shaft.d_minor > 0
+    assert spec.shaft.d_minor < 5.0
+    assert spec.head.type == "pan"
+    assert spec.head.d > 5.0
+    assert spec.shaft.L > 0
+    assert any(isinstance(r, ThreadRegionSpec) for r in spec.regions)
+
+
+def test_metric_m3_spec_has_correct_pitch():
+    spec = screw_spec_from_query(
+        "M3 flat screw 12mm long", apply_realism_checks=False
+    )
+    thread_regions = [r for r in spec.regions if isinstance(r, ThreadRegionSpec)]
+    assert len(thread_regions) >= 1
+    assert thread_regions[0].pitch == 0.5
+
+
+def test_metric_explicit_dimensions_override_chart():
+    parsed = parse_query("M3 screw shank diameter 4 length 15")
+    assert parsed.shank_d == 4.0
 
 
 def test_parse_query_extracts_thread_spans():

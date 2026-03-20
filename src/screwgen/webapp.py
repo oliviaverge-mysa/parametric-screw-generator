@@ -56,6 +56,7 @@ class ChatState:
     pending_flow: str | None = None
     latest_spec: ScrewSpec | None = None
     image_estimate_query: str | None = None
+    image_caption: str = ""
 
 
 class MessageIn(BaseModel):
@@ -91,6 +92,7 @@ _Q_MATCH_NUT_STYLE = "What style for the matching nut?"
 _Q_NUT_SHAPE = "What shape for the nut?"
 _Q_IMAGE_ESTIMATE_CONFIRM = "Does this look right? You can also type corrections."
 _Q_IMAGE_ESTIMATE_EDIT = "Type corrections to the estimate (for example: 'bolt, hex head, length 25, major diameter 5')."
+_Q_SLOTTED_CHOICE = "Slotted or non-slotted?"
 
 # Metric hex nut defaults (coarse series), keyed by thread major diameter (mm):
 # value = (across flats S, thickness M)
@@ -353,28 +355,37 @@ _FASTENER_SYSTEM_PROMPT = (
     "   - square: SQUARE-shaped recess (Robertson) — four straight sides forming a small square hole\n"
     "   - hex: hexagonal hole (Allen key / socket)\n"
     "   - no drive: no recess visible (external hex heads with no socket, carriage bolts, etc.)\n\n"
+    "   COMBINATION / SLOTTED DRIVES: Some screws have a SLOT (a straight line channel) cut\n"
+    "   across the entire head IN ADDITION to another drive recess. For example:\n"
+    "   - A phillips recess WITH a slot running through one arm of the cross → slotted=true, drive_type=phillips\n"
+    "   - A square (Robertson) recess WITH a slot through the corners → slotted=true, drive_type=square\n"
+    "   If you see BOTH a drive recess AND a straight slot line across the head, set slotted=true.\n"
+    "   A plain slot with NO other recess is just 'no drive' (we handle plain slotted separately).\n\n"
     "CRITICAL RULES:\n"
     "- A cross (+) recess is ALWAYS phillips, NEVER torx.\n"
     "- A square hole is ALWAYS square drive, NEVER hex.\n"
     "- A conical/tapered head is ALWAYS flat, NEVER hex.\n"
-    "- Wood screws and deck screws are type 'screw', not 'bolt'.\n\n"
+    "- Wood screws and deck screws are type 'screw', not 'bolt'.\n"
+    "- If a slot line runs across the head through/over a phillips, square, hex or torx recess, set slotted=true.\n\n"
     "First write a brief visual description of what you see (head shape, drive recess shape, thread style, tip shape). "
     "4. THREAD COVERAGE: estimate what fraction of the shaft is threaded.\n"
     "   - 1.0 = fully threaded (threads run from tip to head)\n"
     "   - 0.5 = half threaded (threads on lower half, smooth shank near head)\n"
     "   - Typical wood/deck screws: 0.5–0.7. Typical machine screws: 0.8–1.0.\n\n"
     "Then output strict JSON on a new line with keys: "
-    "fastener_type, head_type, drive_type, major_d_mm, length_mm, pitch_mm, thread_fraction, confidence, notes.\n"
+    "fastener_type, head_type, drive_type, slotted, major_d_mm, length_mm, pitch_mm, thread_fraction, confidence, notes.\n"
     "Allowed fastener_type: screw|bolt. "
     "Allowed head_type: flat|pan|button|hex. "
     "Allowed drive_type: hex|phillips|torx|square|no drive.\n"
+    "slotted: boolean (true if a straight slot line is visible across the head in addition to the drive recess).\n"
     "thread_fraction: float 0.0–1.0 (fraction of shaft that is threaded)."
 )
 _FASTENER_USER_PROMPT = (
     "Carefully examine this fastener. Describe what you see step by step: "
     "1) What is the head shape from the side? 2) What is the recess/drive shape on top? "
-    "3) Is the tip pointed (screw) or flat (bolt)? "
-    "4) What fraction of the shaft has threads? (e.g. 0.5 = half, 1.0 = fully threaded) "
+    "3) Is there a straight SLOT line across the head in addition to the drive recess (combination/slotted drive)? "
+    "4) Is the tip pointed (screw) or flat (bolt)? "
+    "5) What fraction of the shaft has threads? (e.g. 0.5 = half, 1.0 = fully threaded) "
     "Then provide the JSON with your identification and metric dimension estimates."
 )
 
@@ -382,18 +393,73 @@ _FASTENER_USER_PROMPT = (
 def _parse_vision_json(content: str) -> tuple[str, str] | None:
     """Parse the JSON response from a vision model and build query + summary."""
     text = content.strip()
-    m = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if m:
-        text = m.group(0)
+
+    def _extract_first_json(s: str) -> str | None:
+        """Extract the first complete top-level {...} from *s* using brace depth."""
+        depth = 0
+        start: int | None = None
+        in_str = False
+        esc = False
+        for i, c in enumerate(s):
+            if esc:
+                esc = False
+                continue
+            if c == "\\" and in_str:
+                esc = True
+                continue
+            if c == '"' and not esc:
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if c == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0 and start is not None:
+                    return s[start : i + 1]
+        return None
+
+    raw_json = _extract_first_json(text)
+    if raw_json is None:
+        m = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        raw_json = m.group(0) if m else text
+
+    # Strip comments that some models add (// ..., /* ... */, # ...)
+    raw_json = re.sub(r"//[^\n]*", "", raw_json)
+    raw_json = re.sub(r"/\*.*?\*/", "", raw_json, flags=re.DOTALL)
+    raw_json = re.sub(r"#[^\n]*", "", raw_json)
+
     try:
-        est = json.loads(text)
+        est = json.loads(raw_json)
     except Exception as exc:
-        print(f"[VISION] JSON parse failed: {exc}\nRaw: {text[:300]}")
+        print(f"[VISION] JSON parse failed: {exc}\nRaw: {raw_json[:300]}")
         return None
 
     fastener_type = str(est.get("fastener_type", "screw")).strip().lower()
     head_type = str(est.get("head_type", "pan")).strip().lower()
     drive_type = str(est.get("drive_type", "phillips")).strip().lower()
+    is_slotted = bool(est.get("slotted", False))
+
+    if fastener_type == "nut":
+        nut_style = "hex" if head_type in {"hex", "hexagonal"} else "square" if "square" in head_type else "hex"
+        def _nf(key: str, lo: float, hi: float, fb: float) -> float:
+            try:
+                return max(lo, min(hi, float(est.get(key, fb))))
+            except Exception:
+                return fb
+        nut_d = _nf("major_d_mm", 2.0, 30.0, 8.0)
+        nut_pitch = _nf("pitch_mm", 0.4, 3.5, 1.25)
+        query = f"{nut_style} nut M{nut_d:.0f} pitch {nut_pitch:.2f}"
+        summary = (
+            f"Here's what I see:\n"
+            f"{nut_style.title()} Nut\n"
+            f"M{nut_d:.0f} thread, {nut_pitch:.2f} mm pitch"
+        )
+        return query, summary
+
     if fastener_type not in {"screw", "bolt"}:
         fastener_type = "screw"
     if head_type not in {"flat", "pan", "button", "hex"}:
@@ -433,8 +499,9 @@ def _parse_vision_json(content: str) -> tuple[str, str] | None:
             thread_len = min(0.65 * shaft_len, max_threadable)
         else:
             thread_len = min(0.55 * shaft_len, max_threadable)
+    slotted_tag = " slotted" if is_slotted and drive_type != "no drive" else ""
     query = (
-        f"{fastener_type} {head_type} {drive_type} "
+        f"{fastener_type} {head_type} {drive_type}{slotted_tag} "
         f"head diameter {head_d:.2f} head height {head_h:.2f} "
         f"shank diameter {major_d:.2f} root diameter {root_d:.2f} "
         f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
@@ -442,6 +509,8 @@ def _parse_vision_json(content: str) -> tuple[str, str] | None:
     )
     head_label = head_type.title()
     drive_label = drive_type.replace("no drive", "No Drive").title() if drive_type != "no drive" else "None"
+    if is_slotted and drive_type != "no drive":
+        drive_label += "/Slotted"
     type_label = fastener_type.title()
     summary = (
         f"Here's what I see:\n"
@@ -1107,6 +1176,7 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         drive_type = "no drive"
         drive_conf = 0.0
         _drive_was_defaulted = False
+        drive_slotted = False
         drive_hv = 0
         drive_diag = 0
         drive_verts = 0
@@ -1184,9 +1254,13 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
                 hv = 0
                 diag = 0
                 dir_bins: set[int] = set()
+                max_line_len = 0.0
                 if lines is not None:
                     for ln in lines[:, 0, :]:
                         x1, y1, x2, y2 = ln
+                        line_len = math.hypot(x2 - x1, y2 - y1)
+                        if line_len > max_line_len:
+                            max_line_len = line_len
                         ang = abs(math.degrees(math.atan2(y2 - y1, x2 - x1)))
                         ang = min(ang, 180.0 - ang)
                         dir_bins.add(int(ang // 15))
@@ -1560,8 +1634,14 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             thread_len = _clamp(length * 0.74, 0.55 * length, max_threadable)
             thread_len = min(thread_len, max_threadable)
 
+        if max_line_len > 0 and head_width_px > 0:
+            slot_ratio = max_line_len / head_width_px
+            if slot_ratio >= 0.55 and drive_type in {"phillips", "square", "torx", "hex"}:
+                drive_slotted = True
+
+        slotted_tag = " slotted" if drive_slotted else ""
         query = (
-            f"{fastener_type} {head_type} {drive_type} "
+            f"{fastener_type} {head_type} {drive_type}{slotted_tag} "
             f"head diameter {head_d:.2f} head height {head_h:.2f} "
             f"shank diameter {major_d:.2f} root diameter {root_d:.2f} "
             f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
@@ -1569,6 +1649,8 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         )
         head_label = head_type.title()
         drive_label = "None" if drive_type == "no drive" else drive_type.title()
+        if drive_slotted:
+            drive_label += "/Slotted"
         type_label = fastener_type.title()
         summary = (
             f"Here's what I see:\n"
@@ -1583,7 +1665,12 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
 def _chat_title_for_spec(spec) -> str:
     threadish = any(isinstance(r, ThreadRegionSpec) for r in spec.regions)
     kind = "Bolt" if spec.fastener_type == "bolt" else "Screw"
-    drive = spec.drive.type.title() if spec.drive else "No Drive"
+    if spec.drive:
+        drive = spec.drive.type.title()
+        if spec.drive.slotted:
+            drive += "/Slotted"
+    else:
+        drive = "No Drive"
     head = spec.head.type.title()
     d = spec.shaft.d_minor
     L = spec.shaft.L
@@ -2830,7 +2917,7 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
         iso_preview_path = _DOWNLOAD_DIR / f"{stem}_iso.svg"
         preview_model = (
             screw
-            .rotate((0, 0, 0), (1, 0, 0), 195)
+            .rotate((0, 0, 0), (1, 0, 0), 15)
             .rotate((0, 0, 0), (0, 1, 0), -90)
             .rotate((0, 0, 0), (0, 0, 1), -90)
         )
@@ -3131,10 +3218,23 @@ def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
                     "messages": chat.messages,
                     "pending_question": chat.pending_question,
                 }
-            chat.pending_flow = None
-            chat.pending_question = None
             chat.query = chat.image_estimate_query
             chat.answers = {}
+            _has_drive = re.search(r"\b(phillips|torx|square|hex)\b", chat.query.lower()) is not None
+            _already_slotted = "slotted" in chat.query.lower()
+            if _has_drive and not _already_slotted:
+                chat.pending_flow = "image_slotted_choice"
+                chat.pending_question = _Q_SLOTTED_CHOICE
+                _bot(chat, _Q_SLOTTED_CHOICE, kind="question")
+                return {
+                    "chat_id": chat.id,
+                    "status": "needs_input",
+                    "question": chat.pending_question,
+                    "messages": chat.messages,
+                    "pending_question": chat.pending_question,
+                }
+            chat.pending_flow = None
+            chat.pending_question = None
             result = _attempt_build(chat, use_prompt=False, apply_realism_checks=False)
             if (
                 result.get("status") == "ok"
@@ -3157,6 +3257,26 @@ def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
             "pending_question": chat.pending_question,
         }
 
+    if chat.pending_flow == "image_slotted_choice":
+        if content:
+            _user(chat, content)
+        is_slotted = content.lower().strip() in {"slotted", "slot", "yes", "y", "combo", "combination"}
+        if is_slotted and chat.query and "slotted" not in chat.query.lower():
+            chat.query = chat.query.replace(" head diameter", " slotted head diameter", 1)
+        chat.pending_flow = None
+        chat.pending_question = None
+        result = _attempt_build(chat, use_prompt=False, apply_realism_checks=False)
+        if (
+            result.get("status") == "ok"
+            and chat.latest_spec is not None
+            and chat.pending_flow is None
+            and chat.pending_question is None
+        ):
+            chat.pending_flow = "matching_nut_offer"
+            chat.pending_question = _Q_MATCH_NUT
+            _bot(chat, _Q_MATCH_NUT, kind="question")
+        return {"chat_id": chat.id, **result, "messages": chat.messages, "pending_question": chat.pending_question}
+
     if chat.pending_flow == "image_estimate_edit":
         if not content:
             raise HTTPException(status_code=400, detail="Please provide corrections to continue.")
@@ -3171,10 +3291,23 @@ def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
                 "messages": chat.messages,
                 "pending_question": chat.pending_question,
             }
-        chat.pending_flow = None
-        chat.pending_question = None
         chat.query = f"{chat.image_estimate_query} {content}"
         chat.answers = {}
+        _has_drive = re.search(r"\b(phillips|torx|square|hex)\b", chat.query.lower()) is not None
+        _already_slotted = "slotted" in chat.query.lower()
+        if _has_drive and not _already_slotted:
+            chat.pending_flow = "image_slotted_choice"
+            chat.pending_question = _Q_SLOTTED_CHOICE
+            _bot(chat, _Q_SLOTTED_CHOICE, kind="question")
+            return {
+                "chat_id": chat.id,
+                "status": "needs_input",
+                "question": chat.pending_question,
+                "messages": chat.messages,
+                "pending_question": chat.pending_question,
+            }
+        chat.pending_flow = None
+        chat.pending_question = None
         result = _attempt_build(chat, use_prompt=False, apply_realism_checks=False)
         if (
             result.get("status") == "ok"
@@ -3272,9 +3405,13 @@ async def post_image(chat_id: int, file: UploadFile = File(...), content: str = 
         raise HTTPException(status_code=413, detail="Image too large (max 20 MB).")
     image_path, image_url = _save_uploaded_image(file, data)
     caption = content.strip() or "Uploaded reference image"
+    chat.image_caption = caption
     _user(chat, caption, kind="image", extra={"image_url": image_url})
 
     est_query, summary = _estimate_query_from_image(image_path)
+    if re.search(r"\b(slotted|combo.?drive|combination.?drive|slot)\b", caption.lower()) and "slotted" not in est_query.lower():
+        est_query = est_query.replace(" head diameter", " slotted head diameter", 1)
+        summary = summary.replace(" drive ", "/Slotted drive ", 1)
     chat.image_estimate_query = est_query
     chat.pending_flow = "image_estimate_confirm"
     chat.pending_question = _Q_IMAGE_ESTIMATE_CONFIRM

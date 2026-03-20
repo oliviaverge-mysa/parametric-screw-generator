@@ -46,6 +46,7 @@ class DriveParams:
     fit: DriveFit = "nominal"
     head_d: float | None = None
     min_wall: float | None = None
+    slotted: bool = False
 
 
 def _validate(p: DriveParams) -> None:
@@ -189,15 +190,76 @@ def _make_square_cut(p: DriveParams) -> cq.Workplane:
     return _build_dished_cut(p, lambda: _square_profile(af), opening_radius)
 
 
+_SLOT_ROTATION_DEG: dict[DriveType, float] = {
+    "phillips": 0.0,
+    "square": 45.0,
+    "hex": 0.0,
+    "torx": 0.0,
+}
+
+
+def _drive_slot_width(p: DriveParams) -> float:
+    """Compute slot width that matches the drive recess proportions."""
+    if p.type == "phillips":
+        nominal_slot_w = DRIVE_DIMS[("phillips", 4)]["slot_w"] + 2.0 * p.clearance
+        nominal_slot_l = DRIVE_DIMS[("phillips", 4)]["slot_l"] + 2.0 * p.clearance
+        return nominal_slot_w * _opening_scale(p, nominal_slot_l)
+    if p.type == "square":
+        nominal_af = DRIVE_DIMS[("square", 5)]["across_flats"] + 2.0 * p.clearance
+        af = nominal_af * _opening_scale(p, nominal_af)
+        return af * 0.38
+    if p.type == "hex":
+        nominal_af = DRIVE_DIMS[("hex", 3)]["across_flats"] + 2.0 * p.clearance
+        af = nominal_af * _opening_scale(p, nominal_af)
+        return af * 0.35
+    if p.type == "torx":
+        nominal_r_outer = DRIVE_DIMS[("torx", 6)]["r_outer"] + p.clearance
+        scale = _opening_scale(p, 2.0 * nominal_r_outer)
+        r_inner = (DRIVE_DIMS[("torx", 6)]["r_inner"] + p.clearance) * scale
+        return r_inner * 0.45
+    head_d = p.head_d if p.head_d is not None else 8.0
+    return max(0.4, head_d * 0.08)
+
+
+def _make_slot_cut(p: DriveParams) -> cq.Workplane:
+    """Build a straight slot cut spanning the full head, oriented per drive type."""
+    head_d = p.head_d if p.head_d is not None else 8.0
+    slot_length = head_d
+    slot_width = _drive_slot_width(p)
+    z_bottom, h_total = _z_span_total(p)
+    slot_profile = cq.Workplane("XY").rect(slot_length, slot_width)
+    prism = slot_profile.extrude(h_total).translate((0, 0, z_bottom))
+    r_edge = slot_length / 2.0 + CONFIG["cone_cover_margin"]
+    r_tip = CONFIG["cone_tip_radius"]
+    cone = (
+        cq.Workplane("XY")
+        .workplane(offset=z_bottom)
+        .circle(r_tip)
+        .workplane(offset=h_total)
+        .circle(r_edge)
+        .loft()
+    )
+    slot = prism.intersect(cone)
+    rotation = _SLOT_ROTATION_DEG.get(p.type, 0.0)
+    if rotation != 0.0:
+        slot = slot.rotate((0, 0, 0), (0, 0, 1), rotation)
+    return slot
+
+
 def make_drive_cut(p: DriveParams) -> cq.Workplane:
     _validate(p)
     if p.type == "hex":
-        return _make_hex_cut(p)
-    if p.type == "phillips":
-        return _make_phillips_cut(p)
-    if p.type == "square":
-        return _make_square_cut(p)
-    if p.type == "torx":
-        return _make_torx_cut(p)
-    raise ValueError(f"Unhandled drive type: {p.type!r}")
+        cut = _make_hex_cut(p)
+    elif p.type == "phillips":
+        cut = _make_phillips_cut(p)
+    elif p.type == "square":
+        cut = _make_square_cut(p)
+    elif p.type == "torx":
+        cut = _make_torx_cut(p)
+    else:
+        raise ValueError(f"Unhandled drive type: {p.type!r}")
+    if p.slotted:
+        slot = _make_slot_cut(p)
+        cut = cut.union(slot, clean=True)
+    return cut
 

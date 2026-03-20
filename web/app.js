@@ -741,6 +741,10 @@ function bubble(message, idx, latestUserIdx, chat) {
       /what kind of drive is it\??/i.test(chat.pending_question) ||
       (/drive/i.test(chat.pending_question) && /\b(hex|phillips|torx|no drive)\b/i.test(chat.pending_question))
     );
+  const asksSlottedChoice =
+    message.role === "bot" &&
+    !!chat.pending_question &&
+    /slotted or non.?slotted/i.test(chat.pending_question);
   const asksYesNoChoice =
     message.role === "bot" &&
     !!chat.pending_question &&
@@ -792,6 +796,24 @@ function bubble(message, idx, latestUserIdx, chat) {
       ["square", "Square"],
       ["torx", "Torx"],
       ["no drive", "No Drive"],
+    ];
+    for (const [value, label] of options) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "choice-btn";
+      btn.textContent = label;
+      btn.onclick = async () => {
+        await sendMessage(value);
+      };
+      choices.appendChild(btn);
+    }
+    node.appendChild(choices);
+  } else if (isLastMessage && asksSlottedChoice && chat.pending_question) {
+    const choices = document.createElement("div");
+    choices.className = "choice-actions";
+    const options = [
+      ["non-slotted", "Non-Slotted"],
+      ["slotted", "Slotted"],
     ];
     for (const [value, label] of options) {
       const btn = document.createElement("button");
