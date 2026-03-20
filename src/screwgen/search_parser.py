@@ -210,7 +210,7 @@ def _infer_drive(text: str) -> tuple[str | None, int | None]:
     _DRIVE_PATTERNS: list[tuple[str, str, int]] = [
         (r"\b(torx|star drive)\b", "torx", 6),
         (r"\b(phillips|philips|cross[- ]head)\b", "phillips", 4),
-        (r"\b(square drive|robertson|square recess)\b", "square", 5),
+        (r"\b(square drive|robertson|square recess|square)\b", "square", 5),
         (r"\b(hex drive|allen|hex socket|socket head)\b", "hex", 3),
     ]
     best: tuple[str | None, int | None] = (None, None)

@@ -35,8 +35,9 @@ def test_thread_param_validation():
         apply_external_thread(core, shaft, ThreadParams(pitch=1.0, length=0.0))
     with pytest.raises(ValueError, match="start_from_head must be >= 0"):
         apply_external_thread(core, shaft, ThreadParams(pitch=1.0, length=10.0, start_from_head=-1.0))
-    with pytest.raises(ValueError, match="must be <= shaft_spec.L - shaft_spec.tip_len"):
-        apply_external_thread(core, shaft, ThreadParams(pitch=1.0, length=27.0))
+    # Thread length exceeding available space is clamped rather than rejected
+    result = apply_external_thread(core, shaft, ThreadParams(pitch=1.0, length=27.0))
+    assert result.val().isValid()
 
 
 @pytest.mark.parametrize("mode", ["add", "cut"])

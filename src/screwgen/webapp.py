@@ -15,6 +15,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except ImportError:
+    _env_path = Path(__file__).resolve().parents[2] / ".env"
+    if _env_path.is_file():
+        for _line in _env_path.read_text(encoding="utf-8").splitlines():
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                _k, _v = _k.strip(), _v.strip()
+                if _k and _k not in os.environ:
+                    os.environ[_k] = _v
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -320,89 +334,61 @@ def _save_uploaded_image(upload: UploadFile, data: bytes) -> tuple[Path, str]:
     return out_path, f"/downloads/{out_path.name}"
 
 
-def _estimate_query_from_image_multimodal(image_path: Path) -> tuple[str, str] | None:
-    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
-    if not api_key:
-        return None
+_FASTENER_SYSTEM_PROMPT = (
+    "You are a fastener-vision expert. You must analyze the image and identify ONE primary fastener.\n\n"
+    "## Step-by-step identification\n\n"
+    "1. FASTENER TYPE (screw vs bolt):\n"
+    "   - screw: has a pointed tip and/or self-tapping threads (thread crests are sharp, spacing is wider)\n"
+    "   - bolt: has a blunt/flat end, machine threads (fine, uniform, closely spaced)\n\n"
+    "2. HEAD TYPE (look at the head SHAPE from the SIDE profile):\n"
+    "   - flat: countersunk / conical / tapered — the head narrows into the shaft like a cone or V-shape. "
+    "Designed to sit flush with the surface. Very common on wood screws and deck screws.\n"
+    "   - pan: cylindrical sides with a slightly domed top — taller and more boxy than button\n"
+    "   - button: low dome / mushroom shape — smoothly rounded, low profile\n"
+    "   - hex: clearly six-sided / hexagonal — angular faceted shape. ONLY use hex if you can see flat "
+    "sides forming a hexagon. A tapered/conical head is NEVER hex.\n\n"
+    "3. DRIVE TYPE (look at the recess/socket carved into the TOP of the head):\n"
+    "   - phillips: cross / plus (+) shaped recess\n"
+    "   - torx: six-pointed STAR-shaped recess (like an asterisk with 6 rounded points)\n"
+    "   - square: SQUARE-shaped recess (Robertson) — four straight sides forming a small square hole\n"
+    "   - hex: hexagonal hole (Allen key / socket)\n"
+    "   - no drive: no recess visible (external hex heads with no socket, carriage bolts, etc.)\n\n"
+    "CRITICAL RULES:\n"
+    "- A cross (+) recess is ALWAYS phillips, NEVER torx.\n"
+    "- A square hole is ALWAYS square drive, NEVER hex.\n"
+    "- A conical/tapered head is ALWAYS flat, NEVER hex.\n"
+    "- Wood screws and deck screws are type 'screw', not 'bolt'.\n\n"
+    "First write a brief visual description of what you see (head shape, drive recess shape, thread style, tip shape). "
+    "4. THREAD COVERAGE: estimate what fraction of the shaft is threaded.\n"
+    "   - 1.0 = fully threaded (threads run from tip to head)\n"
+    "   - 0.5 = half threaded (threads on lower half, smooth shank near head)\n"
+    "   - Typical wood/deck screws: 0.5–0.7. Typical machine screws: 0.8–1.0.\n\n"
+    "Then output strict JSON on a new line with keys: "
+    "fastener_type, head_type, drive_type, major_d_mm, length_mm, pitch_mm, thread_fraction, confidence, notes.\n"
+    "Allowed fastener_type: screw|bolt. "
+    "Allowed head_type: flat|pan|button|hex. "
+    "Allowed drive_type: hex|phillips|torx|square|no drive.\n"
+    "thread_fraction: float 0.0–1.0 (fraction of shaft that is threaded)."
+)
+_FASTENER_USER_PROMPT = (
+    "Carefully examine this fastener. Describe what you see step by step: "
+    "1) What is the head shape from the side? 2) What is the recess/drive shape on top? "
+    "3) Is the tip pointed (screw) or flat (bolt)? "
+    "4) What fraction of the shaft has threads? (e.g. 0.5 = half, 1.0 = fully threaded) "
+    "Then provide the JSON with your identification and metric dimension estimates."
+)
 
-    model = (os.getenv("OPENAI_VISION_MODEL") or "gpt-4o-mini").strip()
-    base_url = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
-    url = f"{base_url}/chat/completions"
 
-    try:
-        raw = image_path.read_bytes()
-    except Exception:
-        return None
-    mime = "image/png"
-    ext = image_path.suffix.lower()
-    if ext in {".jpg", ".jpeg"}:
-        mime = "image/jpeg"
-    elif ext == ".webp":
-        mime = "image/webp"
-    elif ext == ".gif":
-        mime = "image/gif"
-    b64 = base64.b64encode(raw).decode("ascii")
-    image_url = f"data:{mime};base64,{b64}"
-
-    system_msg = (
-        "You are a fastener-vision estimator. Analyze the image and infer ONE primary fastener only. "
-        "Ignore companion hardware such as washers/nuts/background items. "
-        "Return ONLY strict JSON with keys: "
-        "fastener_type, head_type, drive_type, major_d_mm, length_mm, pitch_mm, confidence, notes. "
-        "Allowed fastener_type: screw|bolt. "
-        "Allowed head_type: flat|pan|button|hex. "
-        "Allowed drive_type: hex|phillips|torx|square|no drive."
-    )
-    user_msg = (
-        "Estimate likely fastener parameters from this photo. "
-        "Use realistic metric defaults when unknown. "
-        "Do not mention companion hardware."
-    )
-
-    payload = {
-        "model": model,
-        "temperature": 0.1,
-        "messages": [
-            {"role": "system", "content": system_msg},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_msg},
-                    {"type": "image_url", "image_url": {"url": image_url}},
-                ],
-            },
-        ],
-    }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return None
-
-    content = ""
-    try:
-        content = body["choices"][0]["message"]["content"]
-    except Exception:
-        return None
-    if not isinstance(content, str) or not content.strip():
-        return None
-
+def _parse_vision_json(content: str) -> tuple[str, str] | None:
+    """Parse the JSON response from a vision model and build query + summary."""
     text = content.strip()
     m = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if m:
         text = m.group(0)
     try:
         est = json.loads(text)
-    except Exception:
+    except Exception as exc:
+        print(f"[VISION] JSON parse failed: {exc}\nRaw: {text[:300]}")
         return None
 
     fastener_type = str(est.get("fastener_type", "screw")).strip().lower()
@@ -434,13 +420,19 @@ def _estimate_query_from_image_multimodal(image_path: Path) -> tuple[str, str] |
     tip_len = 0.0 if fastener_type == "bolt" else max(0.5, min(2.0, 0.12 * length))
     shaft_len = length - head_h
     max_threadable = shaft_len - tip_len
+    thread_frac = _f("thread_fraction", 0.1, 1.0, 0.0)
     if fastener_type == "bolt":
         std_thread = min(2.0 * major_d + 6.0, 0.45 * length)
         thread_len = min(std_thread, max_threadable)
+    elif thread_frac > 0.05:
+        thread_len = min(thread_frac * shaft_len, max_threadable)
     else:
-        thread_len = min(max(0.55 * length, min(0.90 * length, max_threadable)), max_threadable)
-    conf = _f("confidence", 0.0, 1.0, 0.55)
-    notes = str(est.get("notes", "")).strip()
+        if length <= 25:
+            thread_len = min(0.85 * shaft_len, max_threadable)
+        elif length <= 50:
+            thread_len = min(0.65 * shaft_len, max_threadable)
+        else:
+            thread_len = min(0.55 * shaft_len, max_threadable)
     query = (
         f"{fastener_type} {head_type} {drive_type} "
         f"head diameter {head_d:.2f} head height {head_h:.2f} "
@@ -457,6 +449,262 @@ def _estimate_query_from_image_multimodal(image_path: Path) -> tuple[str, str] |
         f"{major_d:.1f} mm diameter, {length:.1f} mm long, {pitch:.2f} mm pitch"
     )
     return query, summary
+
+
+def _read_image_b64(image_path: Path) -> tuple[str, str] | None:
+    """Read an image file and return (mime_type, base64_data) or None."""
+    try:
+        raw = image_path.read_bytes()
+    except Exception:
+        return None
+    mime = "image/png"
+    ext = image_path.suffix.lower()
+    if ext in {".jpg", ".jpeg"}:
+        mime = "image/jpeg"
+    elif ext == ".webp":
+        mime = "image/webp"
+    elif ext == ".gif":
+        mime = "image/gif"
+    return mime, base64.b64encode(raw).decode("ascii")
+
+
+def _call_gemini_vision(api_key: str, image_path: Path) -> tuple[str, str] | None:
+    """Call Google Gemini API for fastener vision analysis."""
+    img = _read_image_b64(image_path)
+    if img is None:
+        return None
+    mime, b64 = img
+
+    model = (os.getenv("GEMINI_VISION_MODEL") or "gemini-2.0-flash").strip()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+    payload = {
+        "systemInstruction": {"parts": [{"text": _FASTENER_SYSTEM_PROMPT}]},
+        "contents": [
+            {
+                "parts": [
+                    {"text": _FASTENER_USER_PROMPT},
+                    {"inlineData": {"mimeType": mime, "data": b64}},
+                ]
+            }
+        ],
+        "generationConfig": {"temperature": 0.1},
+    }
+    payload_bytes = json.dumps(payload).encode("utf-8")
+    body: dict[str, Any] | None = None
+    last_exc: Exception | None = None
+    import time as _time
+    for attempt in range(5):
+        req = urllib.request.Request(
+            url,
+            data=payload_bytes,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            if exc.code == 429 and attempt < 4:
+                wait = min(60, 2 ** (attempt + 1))
+                print(f"[VISION/Gemini] Rate limited (429), retrying in {wait}s (attempt {attempt + 1}/5)...")
+                _time.sleep(wait)
+                continue
+            print(f"[VISION/Gemini] API request failed: {exc}")
+            return None
+        except Exception as exc:
+            print(f"[VISION/Gemini] API request failed: {exc}")
+            return None
+    if body is None:
+        print(f"[VISION/Gemini] All retries exhausted: {last_exc}")
+        return None
+
+    try:
+        content = body["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception:
+        print(f"[VISION/Gemini] Could not extract content from response: {json.dumps(body)[:400]}")
+        return None
+    if not isinstance(content, str) or not content.strip():
+        print("[VISION/Gemini] Empty content returned")
+        return None
+
+    print(f"[VISION/Gemini] Model response:\n{content[:500]}")
+    return _parse_vision_json(content)
+
+
+def _call_openai_vision(api_key: str, image_path: Path) -> tuple[str, str] | None:
+    """Call OpenAI-compatible API for fastener vision analysis."""
+    img = _read_image_b64(image_path)
+    if img is None:
+        return None
+    mime, b64 = img
+    image_url = f"data:{mime};base64,{b64}"
+
+    model = (os.getenv("OPENAI_VISION_MODEL") or "gpt-4o").strip()
+    base_url = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+    url = f"{base_url}/chat/completions"
+
+    payload = {
+        "model": model,
+        "temperature": 0.1,
+        "messages": [
+            {"role": "system", "content": _FASTENER_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": _FASTENER_USER_PROMPT},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            },
+        ],
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=45) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        print(f"[VISION/OpenAI] API request failed: {exc}")
+        return None
+
+    try:
+        content = body["choices"][0]["message"]["content"]
+    except Exception:
+        print(f"[VISION/OpenAI] Could not extract content from response: {body}")
+        return None
+    if not isinstance(content, str) or not content.strip():
+        print("[VISION/OpenAI] Empty content returned")
+        return None
+
+    print(f"[VISION/OpenAI] Model response:\n{content[:500]}")
+    return _parse_vision_json(content)
+
+
+def _call_groq_vision(api_key: str, image_path: Path) -> tuple[str, str] | None:
+    """Call Groq API (Llama 4 Scout vision) for fastener analysis. Free tier: 1000 req/day."""
+    img = _read_image_b64(image_path)
+    if img is None:
+        return None
+    mime, b64 = img
+
+    if len(b64) > 3_500_000:
+        try:
+            from PIL import Image as _PILImage
+            import io as _io
+            with _PILImage.open(image_path) as im:
+                ratio = (3_000_000 / len(b64)) ** 0.5
+                new_w = max(1, int(im.width * ratio))
+                new_h = max(1, int(im.height * ratio))
+                resized = im.resize((new_w, new_h), _PILImage.LANCZOS)
+                buf = _io.BytesIO()
+                resized.save(buf, format="JPEG", quality=85)
+                b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                mime = "image/jpeg"
+        except Exception:
+            pass
+
+    image_url = f"data:{mime};base64,{b64}"
+    model = (os.getenv("GROQ_VISION_MODEL") or "meta-llama/llama-4-scout-17b-16e-instruct").strip()
+    url = "https://api.groq.com/openai/v1/chat/completions"
+
+    payload = {
+        "model": model,
+        "temperature": 0.1,
+        "max_completion_tokens": 1024,
+        "messages": [
+            {"role": "system", "content": _FASTENER_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": _FASTENER_USER_PROMPT},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            },
+        ],
+    }
+    payload_bytes = json.dumps(payload).encode("utf-8")
+    body: dict[str, Any] | None = None
+    last_exc: Exception | None = None
+    import time as _time
+    for attempt in range(3):
+        req = urllib.request.Request(
+            url,
+            data=payload_bytes,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "ParametricScrewGenerator/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            if exc.code == 429 and attempt < 2:
+                wait = 2 * (attempt + 1)
+                print(f"[VISION/Groq] Rate limited (429), retrying in {wait}s (attempt {attempt + 1}/3)...")
+                _time.sleep(wait)
+                continue
+            print(f"[VISION/Groq] API request failed: {exc}")
+            return None
+        except Exception as exc:
+            print(f"[VISION/Groq] API request failed: {exc}")
+            return None
+    if body is None:
+        print(f"[VISION/Groq] All retries exhausted: {last_exc}")
+        return None
+
+    try:
+        content = body["choices"][0]["message"]["content"]
+    except Exception:
+        print(f"[VISION/Groq] Could not extract content from response: {json.dumps(body)[:400]}")
+        return None
+    if not isinstance(content, str) or not content.strip():
+        print("[VISION/Groq] Empty content returned")
+        return None
+
+    print(f"[VISION/Groq] Model response:\n{content[:500]}")
+    return _parse_vision_json(content)
+
+
+def _estimate_query_from_image_multimodal(image_path: Path) -> tuple[str, str] | None:
+    groq_key = (os.getenv("GROQ_API_KEY") or "").strip()
+    gemini_key = (os.getenv("GEMINI_API_KEY") or "").strip()
+    openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+
+    if groq_key:
+        print(f"[VISION] Groq API key found (len={len(groq_key)}), attempting Groq/Llama Vision analysis...")
+        result = _call_groq_vision(groq_key, image_path)
+        if result is not None:
+            return result
+        print("[VISION] Groq failed, trying next provider...")
+
+    if gemini_key:
+        print(f"[VISION] Gemini API key found (len={len(gemini_key)}), attempting Gemini analysis...")
+        result = _call_gemini_vision(gemini_key, image_path)
+        if result is not None:
+            return result
+        print("[VISION] Gemini failed, trying next provider...")
+
+    if openai_key:
+        print(f"[VISION] OpenAI API key found (len={len(openai_key)}), attempting OpenAI analysis...")
+        return _call_openai_vision(openai_key, image_path)
+
+    if not groq_key and not gemini_key and not openai_key:
+        print("[VISION] No API keys set (GROQ_API_KEY / GEMINI_API_KEY / OPENAI_API_KEY), using OpenCV fallback")
+    return None
 
 
 def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
@@ -628,14 +876,6 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
                 )
                 bg = np.median(border, axis=0)
                 diff = np.linalg.norm(src_in.astype(np.float32) - bg[None, None, :], axis=2)
-                thr = max(20.0, float(np.percentile(diff, 83)))
-                mask = (diff > thr).astype(np.uint8) * 255
-                mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-
-                cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                if not cnts:
-                    return None
 
                 def _score_contour(c):
                     area = float(cv2.contourArea(c))
@@ -657,17 +897,40 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
                     border_touch = x <= 1 or y <= 1 or (x + bw) >= (w1 - 1) or (y + bh) >= (h1 - 1)
                     return 2.4 * elong + 0.7 * math.sqrt(area_frac) - 1.5 * fill - 1.1 * center - (1.6 if border_touch else 0.0)
 
-                cnt = max(cnts, key=_score_contour)
-                best_score = _score_contour(cnt)
-                if cv2.contourArea(cnt) < 0.0012 * (w1 * h1):
-                    return None
-                x, y, bw, bh = cv2.boundingRect(cnt)
-                pad = 8
-                x0 = max(0, x - pad)
-                y0 = max(0, y - pad)
-                x1 = min(w1, x + bw + pad)
-                y1 = min(h1, y + bh + pad)
-                return src_in[y0:y1, x0:x1], mask[y0:y1, x0:x1], cnt, float(best_score)
+                def _try_threshold(thr_val):
+                    m = (diff > thr_val).astype(np.uint8) * 255
+                    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+                    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+                    cs, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    if not cs:
+                        return None
+                    best_c = max(cs, key=_score_contour)
+                    if cv2.contourArea(best_c) < 0.0012 * (w1 * h1):
+                        return None
+                    sc = _score_contour(best_c)
+                    x, y, bw, bh = cv2.boundingRect(best_c)
+                    pad = 8
+                    x0 = max(0, x - pad)
+                    y0 = max(0, y - pad)
+                    x1 = min(w1, x + bw + pad)
+                    y1 = min(h1, y + bh + pad)
+                    return src_in[y0:y1, x0:x1], m[y0:y1, x0:x1], best_c, sc
+
+                thr = max(20.0, float(np.percentile(diff, 83)))
+                result = _try_threshold(thr)
+
+                # When the primary threshold is very high, parts of the subject
+                # (e.g. a bright metal screw on a white background) may be lost.
+                # Retry at a lower threshold and pick the result with stronger
+                # elongation score if the primary result looks too compact.
+                if thr > 80.0:
+                    alt_thr = max(20.0, float(np.percentile(diff, 65)))
+                    if alt_thr < thr * 0.85:
+                        alt = _try_threshold(alt_thr)
+                        if alt is not None and (result is None or alt[3] > result[3] + 0.3):
+                            result = alt
+
+                return result
 
             picked = _extract_from(src)
             # Screenshot card detection can occasionally over-crop; keep a raw
@@ -684,7 +947,6 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         if extracted is None:
             return _fallback_from_size()
         crop, crop_mask, cnt = extracted
-
         pts = cv2.findNonZero(crop_mask)
         if pts is None:
             return _fallback_from_size()
@@ -759,6 +1021,14 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         rw_cnt, rh_cnt = rect_cnt[1]
         contour_elong = max(rw_cnt, rh_cnt) / max(1.0, min(rw_cnt, rh_cnt))
 
+        # Analyse dominant colour of the extracted subject for contextual hints.
+        _subj_mask = crop_mask if crop_mask.shape[:2] == crop.shape[:2] else None
+        _subj_pixels = crop[_subj_mask > 0] if _subj_mask is not None and np.any(_subj_mask > 0) else crop.reshape(-1, 3)
+        _mean_bgr = np.mean(_subj_pixels.astype(np.float32), axis=0)
+        _mean_gray = float(np.mean(_mean_bgr))
+        _is_very_dark = _mean_gray < 60
+        _is_warm_toned = float(_mean_bgr[2]) > float(_mean_bgr[0]) + 15 and float(_mean_bgr[2]) > 90
+
         screw_score = 0.0
         bolt_score = 0.0
         screw_score += max(0.0, 0.57 - tip_ratio) * 2.4
@@ -792,7 +1062,10 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         pan_score = 0.0
         button_score = 0.0
         flat_score += max(0.0, head_ratio - 1.24) * 1.6
-        flat_score += max(0.0, head_drop - 0.10) * 3.0
+        # When head_ratio < 1.0 the head doesn't protrude, so the measured
+        # "drop" is likely from a decorative cap, not a countersunk taper.
+        _drop_weight = 3.0 if head_ratio >= 1.0 else 1.0
+        flat_score += max(0.0, head_drop - 0.10) * _drop_weight
         flat_score += max(0.0, head_taper - 0.10) * 2.2
         if head_len_ratio < 1.25:
             flat_score += 0.5
@@ -800,6 +1073,16 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             flat_score += 0.35
         if contour_elong > 2.4:
             flat_score += 0.20
+        # Countersunk heads barely protrude beyond the shaft; on elongated
+        # screws a head_ratio near 1.0 is a strong flat/countersunk signal.
+        if head_ratio < 1.15 and contour_elong > 2.5:
+            flat_score += 0.55
+        # Dark (black) screws are overwhelmingly drywall screws → flat head.
+        if _is_very_dark and contour_elong > 2.2:
+            flat_score += 0.65
+        # Warm / bronze-toned screws are overwhelmingly deck screws → flat head.
+        if _is_warm_toned and contour_elong > 2.8:
+            flat_score += 0.60
         pan_score += max(0.0, head_ratio - 1.18) * 1.3
         pan_score += max(0.0, 1.6 - head_len_ratio) * 0.5
         if head_drop < 0.14:
@@ -823,6 +1106,7 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
 
         drive_type = "no drive"
         drive_conf = 0.0
+        _drive_was_defaulted = False
         drive_hv = 0
         drive_diag = 0
         drive_verts = 0
@@ -835,8 +1119,9 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         drive_shape_sq = 0.0
         drive_shape_tx = 0.0
         # Keep drive analysis tightly around the head; including too much shaft
-        # introduces thread lines that look like false drive strokes.
-        head_width_px = int(min(rot.shape[1], max(22, round(max(1.15 * head_len, 0.14 * n)))))
+        # introduces thread lines that look like false drive strokes.  Use at
+        # least 0.7*shaft_w so the ROI covers the full head disc on small images.
+        head_width_px = int(min(rot.shape[1], max(22, round(max(1.15 * head_len, 0.14 * n, 0.7 * shaft_w)))))
         head_roi = rot[:, :head_width_px] if head_left else rot[:, -head_width_px:]
         gray = cv2.cvtColor(head_roi, cv2.COLOR_BGR2GRAY)
         clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
@@ -1085,7 +1370,7 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         if head_conf < 0.50 and fastener_type == "screw" and drive_type == "phillips" and head_ratio > 1.12:
             head_type = "flat"
             head_conf = _clamp(head_conf + 0.22, 0.0, 0.99)
-        if head_conf < 0.50 and fastener_type == "screw" and drive_type == "phillips":
+        if head_conf < 0.50 and fastener_type == "screw" and drive_type == "phillips" and head_ratio >= 1.0:
             head_type = "flat"
             head_conf = _clamp(head_conf + 0.16, 0.0, 0.99)
         if (
@@ -1109,7 +1394,7 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         if drive_type == "phillips" and drive_diamond >= 0.45 and drive_verts <= 6:
             drive_type = "square"
             drive_conf = _clamp(max(drive_conf, 0.60), 0.0, 0.99)
-        if drive_type == "phillips" and head_type == "flat" and drive_conf < 0.78 and drive_verts <= 8:
+        if drive_type == "phillips" and head_type == "flat" and drive_conf < 0.78 and drive_verts <= 8 and not _drive_was_defaulted:
             drive_type = "square"
             drive_conf = _clamp(max(drive_conf, 0.56), 0.0, 0.99)
         if (
@@ -1120,19 +1405,19 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         ):
             drive_type = "square"
             drive_conf = _clamp(max(drive_conf, 0.58), 0.0, 0.99)
-        if drive_type == "phillips" and drive_solidity > 0.80 and drive_verts <= 5:
+        if drive_type == "phillips" and drive_solidity > 0.80 and drive_verts <= 5 and not _drive_was_defaulted:
             drive_type = "square"
             drive_conf = _clamp(max(drive_conf, 0.55), 0.0, 0.99)
-        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_verts >= 8 and drive_hv >= 2 and drive_diag >= 1 and drive_hv < 25:
+        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_verts >= 8 and drive_hv >= 2 and drive_diag >= 1 and drive_hv < 25 and not _drive_was_defaulted:
             drive_type = "torx"
             drive_conf = _clamp(max(drive_conf, 0.58), 0.0, 0.99)
-        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_dir_div >= 4 and drive_diag >= 1 and drive_hv < 25:
+        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_dir_div >= 4 and drive_diag >= 1 and drive_hv < 25 and not _drive_was_defaulted:
             drive_type = "torx"
             drive_conf = _clamp(max(drive_conf, 0.56), 0.0, 0.99)
-        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_fine_verts >= 8 and drive_diag >= 1 and drive_hv < 25:
+        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_fine_verts >= 8 and drive_diag >= 1 and drive_hv < 25 and not _drive_was_defaulted:
             drive_type = "torx"
             drive_conf = _clamp(max(drive_conf, 0.57), 0.0, 0.99)
-        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_lobes >= 5:
+        if drive_type == "phillips" and head_type in {"pan", "button"} and drive_lobes >= 5 and not _drive_was_defaulted:
             drive_type = "torx"
             drive_conf = _clamp(max(drive_conf, 0.60), 0.0, 0.99)
         # Very low solidity (star-shaped contour) is the strongest torx signal;
@@ -1155,11 +1440,14 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             drive_type = "square"
             drive_conf = _clamp(max(drive_conf, 0.62), 0.0, 0.99)
         # Head refinements that depend on the final drive classification.
+        # Require elongated contour (> 2.0) to avoid false flat classification
+        # on short/stocky capped screws where head_drop is caused by cap shape.
         if (
             fastener_type == "screw"
             and drive_type in {"phillips", "square"}
             and head_type != "flat"
             and head_drop > 0.11
+            and contour_elong > 2.0
         ):
             head_type = "flat"
             head_conf = _clamp(max(head_conf, 0.52), 0.0, 0.99)
@@ -1170,12 +1458,44 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         if head_taper >= 0.10 and fastener_type == "bolt":
             fastener_type = "screw"
             type_conf = _clamp(max(type_conf, 0.58), 0.0, 0.99)
-        if drive_type == "no drive" and tip_ratio > 0.66 and type_conf < 0.72 and head_taper < 0.08:
+
+        # On short/stocky contours (elong < 2.0) where the head barely
+        # protrudes (head_ratio < 1.0), drive detection is unreliable — the
+        # head ROI is dominated by cap/surface texture rather than a recess.
+        # Reset to phillips (most common) to avoid false square/torx hits.
+        if contour_elong < 2.0 and head_ratio < 1.0 and drive_type in {"square", "torx"} and fastener_type == "screw":
+            drive_type = "phillips"
+            drive_conf = 0.30
+
+        # Strong screw evidence that should prevent bolt overrides:
+        # high elongation, tapered tip, thread roughness, or clear classification.
+        _strong_screw = (
+            screw_score > bolt_score + 0.5
+            or contour_elong > 2.1
+            or tip_taper > 0.12
+            or roughness > 0.09
+            or (tip_ratio < 0.50 and screw_score > bolt_score)
+        )
+        if drive_type == "no drive" and tip_ratio > 0.66 and type_conf < 0.72 and head_taper < 0.08 and not _strong_screw:
             fastener_type = "bolt"
             type_conf = _clamp(max(type_conf, 0.64), 0.0, 0.99)
         if fastener_type == "bolt" and drive_type == "no drive" and head_conf < 0.80 and head_taper < 0.08:
             head_type = "hex"
             head_conf = _clamp(max(head_conf, 0.66), 0.0, 0.99)
+
+        # When drive detection fails on a confirmed screw, default to
+        # phillips (most common drive) rather than "no drive" which would
+        # cascade into incorrect bolt/hex reclassification.
+        _drive_was_defaulted = False
+        if fastener_type == "screw" and drive_type == "no drive" and _strong_screw:
+            drive_type = "phillips"
+            drive_conf = 0.30
+            _drive_was_defaulted = True
+        # Warm/bronze elongated screws are overwhelmingly deck screws with
+        # square (Robertson) drive; override the phillips default.
+        if _is_warm_toned and contour_elong > 2.8 and drive_conf < 0.50 and fastener_type == "screw":
+            drive_type = "square"
+            drive_conf = _clamp(max(drive_conf, 0.40), 0.0, 0.99)
 
         obj_len_px = float(n)
         rel = shaft_w / max(obj_len_px, 1.0)
@@ -1185,7 +1505,7 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         common = [2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 8.0]
         major_d = min(common, key=lambda d: abs(d - major_cont))
         length = _clamp(major_d * _clamp((obj_len_px / max(shaft_w, 1.0)) * 0.62, 2.4, 8.8), 8.0, 90.0)
-        if drive_type == "no drive" and major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.3 and head_taper < 0.08:
+        if drive_type == "no drive" and major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.3 and head_taper < 0.08 and not _strong_screw:
             fastener_type = "bolt"
             type_conf = _clamp(max(type_conf, 0.66), 0.0, 0.99)
             if head_conf < 0.82:
@@ -1195,14 +1515,14 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
         # current drive classification (avoids stripping a real phillips/torx/
         # square on a short thick screw photographed at an angle).
         _has_template_evidence = max(drive_shape_ph, drive_shape_sq, drive_shape_tx) > 0.10
-        if major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.3 and head_ratio > 1.22 and not _has_template_evidence and head_taper < 0.08:
+        if major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.3 and head_ratio > 1.22 and not _has_template_evidence and head_taper < 0.08 and not _strong_screw:
             fastener_type = "bolt"
             head_type = "hex"
             drive_type = "no drive"
             type_conf = _clamp(max(type_conf, 0.68), 0.0, 0.99)
             head_conf = _clamp(max(head_conf, 0.70), 0.0, 0.99)
             drive_conf = _clamp(max(drive_conf, 0.60), 0.0, 0.99)
-        if major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.0 and drive_type == "phillips" and not _has_template_evidence and head_taper < 0.08:
+        if major_d >= 5.5 and (length / max(major_d, 1e-6)) < 3.0 and drive_type == "phillips" and not _has_template_evidence and head_taper < 0.08 and not _strong_screw:
             fastener_type = "bolt"
             head_type = "hex"
             drive_type = "no drive"
@@ -1397,7 +1717,11 @@ def _write_engineering_drawing_pdf(
     from reportlab.pdfgen import canvas
 
     author = (author_name or os.getenv("DRAWING_AUTHOR", "") or "User").strip() or "User"
-    screw_label = (screw_name or f"{spec.head.type.title()} {spec.fastener_type.title()}").strip()
+    _overall_len = float(spec.shaft.L) + float(spec.head.h)
+    _dim_str = f"({float(spec.shaft.d_minor):.1f} x {_overall_len:.1f} mm)"
+    _type_label = f"{spec.head.type.title()} {(spec.drive.type.title() + ' ') if spec.drive else ''}"
+    _threaded_label = "Threaded " if any(isinstance(r, ThreadRegionSpec) for r in spec.regions) else ""
+    screw_label = (screw_name or f"{_type_label}{_threaded_label}{spec.fastener_type.title()} {_dim_str}").strip()
 
     head_d = float(spec.head.d)
     head_h = float(spec.head.h)
@@ -1548,22 +1872,27 @@ def _write_engineering_drawing_pdf(
         c.drawCentredString(ix + iw + zone_band * 0.5, y + row_h * 0.5 - 2, lab)
 
     # Header – part name as title, fixed near top edge.
-    header_y = iy + ih - 24
+    header_y = iy + ih - 22
     c.setFont("Helvetica-Bold", 13)
-    c.drawString(ix + 44, header_y, screw_label[:70])
+    c.drawString(ix + 16, header_y, screw_label[:70])
     c.setFont("Helvetica", 8.5)
-    c.drawString(ix + 44, header_y - 14, f"Head: {spec.head.type.title()} | Drive: {drive.title()} | Units: mm")
+    c.drawString(ix + 16, header_y - 14, f"Head: {spec.head.type.title()} | Drive: {drive.title()} | Units: mm")
 
-    # Layout: both views share one scale for proportional accuracy.
-    side_x = ix + 44
-    side_y = iy + ih * 0.66
+    # Layout: views get the upper ~65% of the inner area; iso + title block below.
+    view_zone_top = iy + ih - 46
+    view_zone_bot = iy + ih * 0.35
+    view_zone_mid = (view_zone_top + view_zone_bot) * 0.5
 
-    dim_gap_lr = 130
-    right_pad = 60
+    side_x = ix + 56
+    side_y = view_zone_mid
+
+    dim_gap_lr = 80
+    right_pad = 36
     total_extent_mm = max(head_h + length + head_d, 1e-6)
-    px_per_mm = min((iw - 44 - dim_gap_lr - right_pad) / total_extent_mm, 14.0)
-    px_per_mm = min(px_per_mm, (ih * 0.28) / max(0.5 * head_d, 1e-6))
-    px_per_mm = max(px_per_mm, 2.5)
+    view_zone_half_h = (view_zone_top - view_zone_bot) * 0.5
+    px_per_mm = min((iw - 56 - dim_gap_lr - right_pad) / total_extent_mm, 22.0)
+    px_per_mm = min(px_per_mm, (view_zone_half_h * 0.78) / max(0.5 * head_d, 1e-6))
+    px_per_mm = max(px_per_mm, 3.0)
 
     shank_r = 0.5 * shaft_d * px_per_mm
     head_r = 0.5 * head_d * px_per_mm
@@ -1578,10 +1907,10 @@ def _write_engineering_drawing_pdf(
     top_r = head_r
     top_cx = x_tip_end + dim_gap_lr + top_r
     _space_right = ix + iw - right_pad - (top_cx + top_r)
-    if _space_right > 30:
-        top_cx += _space_right * 0.35
+    if _space_right > 20:
+        top_cx += _space_right * 0.40
     top_cy = side_y
-    side_label_y = side_y + max(head_r, shank_r) + 24
+    side_label_y = side_y + max(head_r, shank_r) + 20
 
     # Side-view profile.
     if spec.head.type == "flat":
@@ -1669,7 +1998,7 @@ def _write_engineering_drawing_pdf(
 
     c.setFont("Helvetica-Bold", 9)
     c.drawString(side_x, side_label_y, "SIDE VIEW")
-    c.drawString(top_cx - 22, top_cy + top_r + 20, "TOP VIEW")
+    c.drawString(top_cx - 24, top_cy + top_r + 16, "TOP VIEW")
 
     overall_len = head_h + length
 
@@ -1714,11 +2043,12 @@ def _write_engineering_drawing_pdf(
             label_dy=4.0,
         )
 
-    # Head height (above the view, separate from thread dim)
+    # Head height (above the view, above the SIDE VIEW label)
     if head_px > 4:
+        head_dim_y = max(above_part + dim_gap * 1.2, side_label_y + 14)
         _dim_h(
             side_x, x_body0,
-            above_part + dim_gap * 1.2, side_y + max(head_r, shank_r),
+            head_dim_y, side_y + max(head_r, shank_r),
             f"{head_h:.2f}",
             label_dy=4.0,
         )
@@ -1765,8 +2095,15 @@ def _write_engineering_drawing_pdf(
         label_dx=6, label_dy=-2,
     )
 
+    # Precompute title block box so isometric can be placed to its left.
+    tb_w = 285
+    tb_h = 108
+    tb_x = ix + iw - tb_w - 8
+    tb_y = iy + 6
+
+    # Spec text – bottom-left corner, below isometric.
     c.setFont("Helvetica", 8.0)
-    spec_y = iy + 78
+    spec_y = iy + 14
     spec_lines = [
         f"Major \u00d8: {shaft_d:.2f} mm   |   Root \u00d8: {root_d:.2f} mm   |   Head H: {head_h:.2f} mm",
         f"Pitch: {avg_pitch:.3f} mm   |   Threads: ~{int(round(total_threads))}" if avg_pitch else "Pitch: N/A",
@@ -1774,21 +2111,18 @@ def _write_engineering_drawing_pdf(
     if pitch_values and len(set(round(v, 6) for v in pitch_values)) > 1:
         spec_lines.append("Note: Multiple pitch values across thread regions.")
     for i, line in enumerate(spec_lines):
-        c.drawString(ix + 24, spec_y + 20 - i * 13, line)
+        c.drawString(ix + 16, spec_y + 20 - i * 13, line)
 
-    # Precompute title block box so isometric can be placed to its left.
-    tb_w = 285
-    tb_h = 108
-    tb_x = ix + iw - tb_w - 8
-    tb_y = iy + 6
-
-    # Isometric view: prefer actual model snapshot exported as SVG.
-    iso_x = ix + iw * 0.40
-    iso_target_w = max(180.0, (tb_x - iso_x - 14.0) * 0.85)
-    iso_target_h = max(130.0, 1.6 * row_h)
-    iso_y = iy + 18.0
+    # Isometric view: lower-left zone, anchored low.
+    iso_zone_top = view_zone_bot - 14
+    iso_zone_bot = spec_y + 40
+    iso_x = ix + 12
+    iso_avail_w = tb_x - iso_x - 16
+    iso_target_w = min(iso_avail_w, iw * 0.52)
+    iso_target_h = max(100.0, iso_zone_top - iso_zone_bot)
+    iso_y = iso_zone_bot
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(iso_x - 86.0, iso_y + iso_target_h * 0.78, "ISOMETRIC VIEW")
+    c.drawString(iso_x + 4, iso_zone_top + 4, "ISOMETRIC VIEW")
     drew_iso = False
     if iso_svg_path is not None and iso_svg_path.exists():
         try:
@@ -1800,9 +2134,13 @@ def _write_engineering_drawing_pdf(
                 x1, y1, x2, y2 = drawing.getBounds()
                 w = max(1e-6, x2 - x1)
                 h = max(1e-6, y2 - y1)
-                scale = min(iso_target_w / w, iso_target_h / h)
+                scale = min(iso_target_w / w, iso_target_h / h) * 0.88
+                rendered_w = w * scale
+                rendered_h = h * scale
+                cx = iso_x + (iso_target_w - rendered_w) * 0.5
+                cy = iso_y + (iso_target_h - rendered_h) * 0.5
                 c.saveState()
-                c.translate(iso_x, iso_y)
+                c.translate(cx, cy)
                 c.scale(scale, scale)
                 c.translate(-x1, -y1)
                 renderPDF.draw(drawing, c, 0, 0)
@@ -1811,7 +2149,6 @@ def _write_engineering_drawing_pdf(
         except Exception:
             drew_iso = False
     if not drew_iso:
-        # Fallback: simple colored profile if SVG import is unavailable.
         c.setStrokeColorRGB(0.15, 0.2, 0.35)
         c.setFillColorRGB(0.74, 0.8, 0.92)
         bx = iso_x + 10
@@ -2930,6 +3267,9 @@ async def post_image(chat_id: int, file: UploadFile = File(...), content: str = 
         raise HTTPException(status_code=400, detail="Only image uploads are supported.")
 
     data = await file.read()
+    _MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
+    if len(data) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image too large (max 20 MB).")
     image_path, image_url = _save_uploaded_image(file, data)
     caption = content.strip() or "Uploaded reference image"
     _user(chat, caption, kind="image", extra={"image_url": image_url})

@@ -6,7 +6,6 @@ const imageUploadBtn = document.getElementById("image-upload-btn");
 const imageInputEl = document.getElementById("image-input");
 const newChatBtn = document.getElementById("new-chat-btn");
 const deleteChatBtn = document.getElementById("delete-chat-btn");
-const toggleSidebarBtn = document.getElementById("toggle-sidebar-btn");
 const globalMenuBtn = document.getElementById("global-menu-btn");
 const themeToggleBtn = document.getElementById("theme-toggle-btn");
 const appEl = document.querySelector(".app");
@@ -790,6 +789,7 @@ function bubble(message, idx, latestUserIdx, chat) {
     const options = [
       ["hex", "Hex"],
       ["phillips", "Phillips"],
+      ["square", "Square"],
       ["torx", "Torx"],
       ["no drive", "No Drive"],
     ];
@@ -971,13 +971,6 @@ function initPreviewImage(container, previewUrl, hooks) {
   }
   const img = document.createElement("img");
   img.alt = "Fastener preview";
-  // Keep sizing deterministic even if external CSS is stale/cached.
-  img.style.width = "98%";
-  img.style.height = "98%";
-  img.style.objectFit = "contain";
-  img.style.objectPosition = "center center";
-  img.style.display = "block";
-  img.style.margin = "auto";
   let retried = false;
   img.onload = () => hooks.onReady();
   img.onerror = () => {
@@ -1016,9 +1009,6 @@ function setWorking(isWorking) {
 
 function toggleSidebar() {
   appEl.classList.toggle("sidebar-collapsed");
-  if (toggleSidebarBtn) {
-    toggleSidebarBtn.textContent = appEl.classList.contains("sidebar-collapsed") ? "Show Chats" : "Hide Chats";
-  }
 }
 
 async function loadChats() {
@@ -1086,9 +1076,6 @@ inputEl.addEventListener("keydown", (e) => {
   }
 });
 
-if (toggleSidebarBtn) {
-  toggleSidebarBtn.addEventListener("click", toggleSidebar);
-}
 if (globalMenuBtn) {
   globalMenuBtn.addEventListener("click", toggleSidebar);
 }
