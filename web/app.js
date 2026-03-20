@@ -23,8 +23,27 @@ const landingEl = document.getElementById("landing");
 const landingFormEl = document.getElementById("landing-form");
 const landingInputEl = document.getElementById("landing-input");
 const landingSendBtn = document.getElementById("landing-send-btn");
-const landingImageBtn = document.getElementById("landing-image-btn");
+const landingBuilderBtn = document.getElementById("landing-builder-btn");
+const landingChatbotBtn = document.getElementById("landing-chatbot-btn");
 const landingImageInputEl = document.getElementById("landing-image-input");
+const builderViewEl = document.getElementById("builder-view");
+const builderFormEl = document.getElementById("builder-form");
+const builderPreviewEl = document.getElementById("builder-preview");
+const builderGenerateBtn = document.getElementById("builder-generate-btn");
+const builderAnotherBtn = document.getElementById("builder-another-btn");
+const builderMetricInput = document.getElementById("builder-metric");
+const builderSlottedRow = document.getElementById("builder-slotted-row");
+const builderThreadRegionsRow = document.getElementById("builder-thread-regions-row");
+const builderThreadRegionsInput = document.getElementById("builder-thread-regions");
+const sidebarBuilderForm = document.getElementById("sidebar-builder-form");
+const builderNutStyleRow = document.getElementById("builder-nut-style-row");
+const builderEmptyState = document.getElementById("builder-empty-state");
+const sidebarChatsHeader = document.querySelector(".chats-header-row");
+const sidebarRecentSection = document.querySelector(".recent-fasteners");
+const viewNavEl = document.getElementById("view-nav");
+const navBuilderBtn = document.getElementById("nav-builder-btn");
+const navChatBtn = document.getElementById("nav-chat-btn");
+const brandHomeBtn = document.getElementById("brand-home-btn");
 
 let currentChatId = null;
 let pendingQuestion = null;
@@ -37,6 +56,45 @@ let renamingLibraryKey = null;
 let renamingLibraryDraft = "";
 let activeView = "chat";
 let libraryItems = [];
+
+const builderState = {
+  fastener_type: "",
+  head_type: "",
+  drive_type: "",
+  slotted: "",
+  threaded: "yes",
+  matching_nut: "no",
+  nut_style: "hex",
+  head_d: "",
+  head_h: "",
+  shank_d: "",
+  root_d: "",
+  length: "",
+  tip_len: "",
+  pitch: "",
+  thread_len: "",
+  thread_regions: "",
+};
+
+const METRIC_COARSE = {
+  M1: [0.25, 1.1, 0.85],
+  M1_2: [0.25, 1.3, 1.05],
+  M1_4: [0.3, 1.5, 1.2],
+  M1_6: [0.35, 1.7, 1.35],
+  M2: [0.4, 2.2, 1.75],
+  M2_5: [0.45, 2.7, 2.2],
+  M3: [0.5, 3.2, 2.65],
+  M4: [0.7, 4.3, 3.5],
+  M5: [0.8, 5.3, 4.35],
+  M6: [1.0, 6.35, 5.19],
+  M8: [1.25, 8.35, 6.85],
+  M10: [1.5, 10.35, 8.6],
+  M12: [1.75, 12.43, 10.35],
+  M14: [2.0, 14.43, 12.1],
+  M16: [2.0, 16.43, 14.1],
+  M20: [2.5, 20.52, 17.52],
+  M24: [3.0, 24.52, 21.02],
+};
 let libraryRefreshTimer = null;
 const LIBRARY_CACHE_KEY = "fastener-library-cache-v1";
 const THEME_KEY = "fastener-ui-theme-v1";
@@ -136,9 +194,11 @@ function queueLibraryRefresh(delayMs = 120) {
 }
 
 function setActiveView(nextView) {
-  activeView = nextView === "library" ? "library" : "chat";
+  const valid = ["chat", "library", "builder"];
+  activeView = valid.includes(nextView) ? nextView : "chat";
   if (chatPanelEl) chatPanelEl.hidden = activeView !== "chat";
   if (libraryViewEl) libraryViewEl.hidden = activeView !== "library";
+  if (builderViewEl) builderViewEl.hidden = activeView !== "builder";
   if (activeView !== "chat" && contextMenuEl) {
     contextMenuEl.hidden = true;
     contextChatId = null;
@@ -147,6 +207,18 @@ function setActiveView(nextView) {
     libraryContextMenuEl.hidden = true;
     contextLibraryItemKey = null;
   }
+  setSidebarMode(activeView === "builder" ? "builder" : "chat");
+  if (navBuilderBtn) navBuilderBtn.classList.toggle("active", activeView === "builder");
+  if (navChatBtn) navChatBtn.classList.toggle("active", activeView === "chat" || activeView === "library");
+}
+
+function setSidebarMode(mode) {
+  const isBuild = mode === "builder";
+  if (sidebarBuilderForm) sidebarBuilderForm.hidden = !isBuild;
+  const chatListEl2 = document.getElementById("chat-list");
+  if (chatListEl2) chatListEl2.hidden = isBuild;
+  if (sidebarChatsHeader) sidebarChatsHeader.hidden = isBuild;
+  if (sidebarRecentSection) sidebarRecentSection.hidden = false;
 }
 
 function getContextChatMeta() {
@@ -1187,16 +1259,424 @@ document.addEventListener("click", (e) => {
   }
 });
 
+/* ── Builder logic ── */
+
+function parseMetricShorthand(raw) {
+  const s = (raw || "").trim().toUpperCase();
+  if (!s) return null;
+  const m = s.match(/^M(\d+(?:[._]\d+)?)\s*[Xx×]?\s*(\d+(?:\.\d+)?)?\s*[Xx×]?\s*(\d+(?:\.\d+)?)?$/);
+  if (!m) return null;
+  const nomKey = "M" + m[1].replace(".", "_");
+  const entry = METRIC_COARSE[nomKey];
+  if (!entry) return null;
+  const [defaultPitch, shank, root] = entry;
+  const pitch = m[2] ? parseFloat(m[2]) : defaultPitch;
+  const length = m[3] ? parseFloat(m[3]) : null;
+  return { shank_d: shank, root_d: root, pitch, length };
+}
+
+function applyMetricToForm(parsed) {
+  if (!parsed) return;
+  const setDim = (name, val) => {
+    if (val == null) return;
+    const inp = builderFormEl.querySelector(`[data-dim="${name}"]`);
+    if (inp) {
+      inp.value = val;
+      builderState[name] = String(val);
+    }
+  };
+  setDim("shank_d", parsed.shank_d);
+  setDim("root_d", parsed.root_d);
+  setDim("pitch", parsed.pitch);
+  if (parsed.length) setDim("length", parsed.length);
+  updateGenerateBtn();
+}
+
+function updateGenerateBtn() {
+  if (!builderGenerateBtn) return;
+  const hasHeadD = !!builderState.head_d;
+  const hasLength = !!builderState.length;
+  builderGenerateBtn.disabled = !(hasHeadD && hasLength);
+}
+
+function resetBuilderForm() {
+  for (const k of Object.keys(builderState)) builderState[k] = "";
+  builderState.threaded = "yes";
+  builderState.matching_nut = "no";
+  builderState.nut_style = "hex";
+  if (builderFormEl) {
+    builderFormEl.querySelectorAll(".spec-btn.selected").forEach(b => b.classList.remove("selected"));
+    builderFormEl.querySelectorAll(".spec-input").forEach(inp => { inp.value = ""; });
+    const defaultBtns = [
+      '[data-field="threaded"] [data-value="yes"]',
+      '[data-field="matching_nut"] [data-value="no"]',
+      '[data-field="nut_style"] [data-value="hex"]',
+    ];
+    defaultBtns.forEach(sel => {
+      const el = builderFormEl.querySelector(sel);
+      if (el) el.classList.add("selected");
+    });
+  }
+  if (builderSlottedRow) builderSlottedRow.hidden = true;
+  if (builderThreadRegionsRow) builderThreadRegionsRow.hidden = false;
+  if (builderNutStyleRow) builderNutStyleRow.hidden = true;
+  if (builderPreviewEl) builderPreviewEl.hidden = true;
+  if (builderEmptyState) builderEmptyState.hidden = false;
+  updateGenerateBtn();
+}
+
+function buildQueryString() {
+  const parts = [];
+  const headType = builderState.head_type || "pan";
+  const fastenerType = builderState.fastener_type || "screw";
+  const driveType = builderState.drive_type || "no drive";
+
+  parts.push(headType);
+  parts.push(fastenerType);
+
+  if (driveType !== "no drive") {
+    if (builderState.slotted === "yes") parts.push("slotted");
+    parts.push(driveType);
+  } else {
+    parts.push("no drive");
+  }
+
+  if (builderState.threaded === "no") {
+    parts.push("unthreaded");
+  } else {
+    parts.push("threaded");
+  }
+
+  const hasThreadRegions = builderState.thread_regions && builderState.threaded !== "no";
+  const dimMap = {
+    head_d: "head diameter",
+    head_h: "head height",
+    shank_d: "shank diameter",
+    root_d: "root diameter",
+    length: "length",
+    tip_len: "tip length",
+    pitch: "pitch",
+    thread_len: "thread length",
+  };
+  for (const [key, label] of Object.entries(dimMap)) {
+    if (builderState.threaded === "no" && (key === "pitch" || key === "thread_len" || key === "root_d")) continue;
+    if (hasThreadRegions && key === "thread_len") continue;
+    const v = builderState[key];
+    if (v) parts.push(`${label} ${v}`);
+  }
+
+  if (hasThreadRegions) {
+    parts.push(`thread regions ${builderState.thread_regions}`);
+  }
+
+  return parts.join(" ");
+}
+
+async function handleBuilderGenerate() {
+  const query = buildQueryString();
+  if (!query.trim()) return;
+  builderGenerateBtn.disabled = true;
+  builderGenerateBtn.textContent = "Generating...";
+  try {
+    const chatRes = await fetch("/api/chats", { method: "POST" });
+    if (!chatRes.ok) throw new Error("Could not create chat");
+    const chat = await chatRes.json();
+    const chatId = chat.id;
+
+    let data;
+    let pendingDone = false;
+    const msgRes = await fetch(`/api/chats/${chatId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: query }),
+    });
+    if (!msgRes.ok) throw new Error("Build request failed");
+    data = await msgRes.json();
+
+    const maxRounds = 12;
+    for (let i = 0; i < maxRounds && !pendingDone; i++) {
+      const detail = await (await fetch(`/api/chats/${chatId}`)).json();
+      const hasResult = detail.messages.some(m => m.kind === "result" && m.stl_url);
+      if (hasResult && !detail.pending_question) {
+        showBuilderPreview(detail);
+        pendingDone = true;
+        break;
+      }
+      if (!detail.pending_question) {
+        showBuilderPreview(detail);
+        pendingDone = true;
+        break;
+      }
+      const answer = autoAnswerPending(detail.pending_question);
+      if (!answer) {
+        pendingDone = true;
+        break;
+      }
+      const followRes = await fetch(`/api/chats/${chatId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: answer }),
+      });
+      if (!followRes.ok) break;
+      data = await followRes.json();
+    }
+
+    if (!pendingDone) {
+      const detail = await (await fetch(`/api/chats/${chatId}`)).json();
+      showBuilderPreview(detail);
+    }
+
+    currentChatId = chatId;
+    await loadChats();
+    queueLibraryRefresh(200);
+  } catch (err) {
+    alert(err.message || "Generation failed. Please try again.");
+  } finally {
+    builderGenerateBtn.disabled = false;
+    builderGenerateBtn.textContent = "Generate";
+    updateGenerateBtn();
+  }
+}
+
+function autoAnswerPending(question) {
+  if (!question) return null;
+  const q = question.toLowerCase();
+  if (/screw\s+or\s+(a\s+)?bolt/i.test(q)) {
+    return builderState.fastener_type || "screw";
+  }
+  if (/head/i.test(q) && /flat|pan|button|hex/i.test(q)) {
+    return builderState.head_type || "pan";
+  }
+  if (/drive/i.test(q)) {
+    return builderState.drive_type || "no drive";
+  }
+  if (/slotted or non/i.test(q)) {
+    return builderState.slotted === "yes" ? "slotted" : "non-slotted";
+  }
+  if (/press enter/i.test(q) || /assuming.*from dimensions/i.test(q)) {
+    return "ok";
+  }
+  if (/\[y\/n\]/i.test(q) || /does this look right/i.test(q) || /keep your value/i.test(q)) {
+    return "y";
+  }
+  if (/use max threadable/i.test(q)) return builderState.threaded === "no" ? "n" : "y";
+  if (/matching nut/i.test(q)) return builderState.matching_nut === "yes" ? "y" : "n";
+  if (/style.*matching nut|hex.*square/i.test(q) || /nut.*shape/i.test(q)) return builderState.nut_style || "hex";
+  if (/missing.*enter a numeric/i.test(q)) {
+    const field = q.toLowerCase();
+    if (/head diameter/i.test(field) && builderState.head_d) return builderState.head_d;
+    if (/length/i.test(field) && builderState.length) return builderState.length;
+    return null;
+  }
+  return null;
+}
+
+function showBuilderPreview(chatDetail) {
+  const resultMsgs = chatDetail.messages.filter(m => m.kind === "result" && m.stl_url);
+  if (resultMsgs.length === 0) {
+    const lastBot = [...chatDetail.messages].reverse().find(m => m.role === "bot");
+    alert(lastBot ? lastBot.content : "Generation completed but no model was produced.");
+    return;
+  }
+  if (builderEmptyState) builderEmptyState.hidden = true;
+  if (builderPreviewEl) builderPreviewEl.hidden = false;
+
+  const cardsContainer = document.getElementById("builder-preview-cards");
+  if (!cardsContainer) return;
+  cardsContainer.innerHTML = "";
+
+  for (const resultMsg of resultMsgs) {
+    const item = {
+      chat_id: chatDetail.id,
+      chat_title: chatDetail.title || "Fastener",
+      name: deriveItemName(chatDetail, resultMsg),
+      step_url: resultMsg.step_url || "",
+      stl_url: resultMsg.stl_url || "",
+      preview_url: resultMsg.preview_url || "",
+      drawing_url: resultMsg.drawing_url || "",
+      bundle_url: resultMsg.bundle_url || "",
+    };
+    const cached = cacheUpsert(item);
+    persistLibraryNames();
+
+    const card = document.createElement("div");
+    card.className = "builder-preview-card";
+
+    const headerEl = document.createElement("div");
+    headerEl.className = "preview-card-header";
+    headerEl.textContent = itemName(cached);
+
+    const canvasEl = document.createElement("div");
+    canvasEl.className = "preview-canvas builder-preview-canvas";
+
+    const actionsEl = document.createElement("div");
+    actionsEl.className = "result-actions";
+
+    const drawingBtn = document.createElement("a");
+    drawingBtn.className = "download-btn" + (resultMsg.drawing_url ? "" : " disabled");
+    drawingBtn.textContent = resultMsg.drawing_url ? "Drawing" : "Drawing N/A";
+    drawingBtn.href = resultMsg.drawing_url || "#";
+    drawingBtn.download = "";
+
+    const stepBtn = document.createElement("a");
+    stepBtn.className = "download-btn disabled";
+    stepBtn.textContent = "STEP";
+    stepBtn.href = resultMsg.step_url || "#";
+    stepBtn.download = "";
+
+    const stlBtn = document.createElement("a");
+    stlBtn.className = "download-btn disabled";
+    stlBtn.textContent = "STL";
+    stlBtn.href = resultMsg.stl_url || "#";
+    stlBtn.download = "";
+
+    const bundleBtn = document.createElement("a");
+    bundleBtn.className = "download-btn disabled";
+    bundleBtn.textContent = resultMsg.bundle_url ? "ZIP" : "ZIP N/A";
+    bundleBtn.href = resultMsg.bundle_url || "#";
+    bundleBtn.download = "";
+
+    actionsEl.appendChild(drawingBtn);
+    actionsEl.appendChild(stepBtn);
+    actionsEl.appendChild(stlBtn);
+    actionsEl.appendChild(bundleBtn);
+
+    card.appendChild(headerEl);
+    card.appendChild(canvasEl);
+    card.appendChild(actionsEl);
+    cardsContainer.appendChild(card);
+
+    if (resultMsg.preview_url) {
+      initPreviewImage(canvasEl, resultMsg.preview_url, {
+        onReady: () => {
+          stepBtn.classList.remove("disabled");
+          stlBtn.classList.remove("disabled");
+          if (resultMsg.bundle_url) bundleBtn.classList.remove("disabled");
+        },
+        onError: () => {
+          stepBtn.classList.remove("disabled");
+          stlBtn.classList.remove("disabled");
+          if (resultMsg.bundle_url) bundleBtn.classList.remove("disabled");
+        },
+      });
+    } else {
+      stepBtn.classList.remove("disabled");
+      stlBtn.classList.remove("disabled");
+      if (resultMsg.bundle_url) bundleBtn.classList.remove("disabled");
+    }
+  }
+}
+
+function initBuilderEvents() {
+  if (!builderFormEl) return;
+
+  builderFormEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".spec-btn");
+    if (!btn) return;
+    const group = btn.closest(".spec-btn-group");
+    if (!group) return;
+    const field = group.dataset.field;
+    group.querySelectorAll(".spec-btn").forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+    builderState[field] = btn.dataset.value;
+
+    if (field === "drive_type") {
+      const hasDrive = btn.dataset.value && btn.dataset.value !== "no drive";
+      if (builderSlottedRow) {
+        builderSlottedRow.hidden = !hasDrive;
+        if (!hasDrive) {
+          builderState.slotted = "";
+          builderSlottedRow.querySelectorAll(".spec-btn").forEach(b => b.classList.remove("selected"));
+        }
+      }
+    }
+    if (field === "threaded") {
+      const isThreaded = btn.dataset.value === "yes";
+      if (builderThreadRegionsRow) {
+        builderThreadRegionsRow.hidden = !isThreaded;
+        if (!isThreaded) {
+          builderState.thread_regions = "";
+          if (builderThreadRegionsInput) builderThreadRegionsInput.value = "";
+        }
+      }
+    }
+    if (field === "matching_nut") {
+      const wantNut = btn.dataset.value === "yes";
+      if (builderNutStyleRow) {
+        builderNutStyleRow.hidden = !wantNut;
+        if (!wantNut) {
+          builderState.nut_style = "hex";
+          const hexBtn = builderNutStyleRow.querySelector('[data-value="hex"]');
+          builderNutStyleRow.querySelectorAll(".spec-btn").forEach(b => b.classList.remove("selected"));
+          if (hexBtn) hexBtn.classList.add("selected");
+        }
+      }
+    }
+    updateGenerateBtn();
+  });
+
+  builderFormEl.querySelectorAll(".spec-input[data-dim]").forEach(inp => {
+    inp.addEventListener("input", () => {
+      builderState[inp.dataset.dim] = inp.value;
+      updateGenerateBtn();
+    });
+  });
+
+  if (builderThreadRegionsInput) {
+    builderThreadRegionsInput.addEventListener("input", () => {
+      builderState.thread_regions = builderThreadRegionsInput.value.trim();
+    });
+  }
+
+  if (builderMetricInput) {
+    builderMetricInput.addEventListener("change", () => {
+      const parsed = parseMetricShorthand(builderMetricInput.value);
+      if (parsed) applyMetricToForm(parsed);
+    });
+    builderMetricInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const parsed = parseMetricShorthand(builderMetricInput.value);
+        if (parsed) applyMetricToForm(parsed);
+      }
+    });
+  }
+
+  if (builderGenerateBtn) {
+    builderGenerateBtn.addEventListener("click", handleBuilderGenerate);
+  }
+
+  if (builderAnotherBtn) {
+    builderAnotherBtn.addEventListener("click", resetBuilderForm);
+  }
+}
+
 async function boot() {
   applyTheme(detectInitialTheme());
   setWorking(false);
   if (landingSendBtn) landingSendBtn.disabled = false;
   setActiveView("chat");
   setLandingMode(true);
+  initBuilderEvents();
   await loadChats();
 }
 
 boot();
+
+if (landingBuilderBtn) {
+  landingBuilderBtn.addEventListener("click", () => {
+    setLandingMode(false);
+    setActiveView("builder");
+    resetBuilderForm();
+  });
+}
+
+if (landingChatbotBtn) {
+  landingChatbotBtn.addEventListener("click", () => {
+    setLandingMode(false);
+    setActiveView("chat");
+  });
+}
 
 if (landingFormEl) {
   landingFormEl.addEventListener("submit", async (e) => {
@@ -1218,18 +1698,21 @@ if (landingFormEl) {
   });
 }
 
-if (landingImageBtn && landingImageInputEl) {
-  landingImageBtn.addEventListener("click", () => {
-    landingImageInputEl.click();
+if (navBuilderBtn) {
+  navBuilderBtn.addEventListener("click", () => {
+    setActiveView("builder");
   });
-  landingImageInputEl.addEventListener("change", async () => {
-    const file = landingImageInputEl.files && landingImageInputEl.files[0];
-    if (!file) return;
-    setLandingMode(false);
+}
+
+if (navChatBtn) {
+  navChatBtn.addEventListener("click", () => {
     setActiveView("chat");
-    await createChat();
-    await sendImageMessage(file);
-    landingImageInputEl.value = "";
+  });
+}
+
+if (brandHomeBtn) {
+  brandHomeBtn.addEventListener("click", () => {
+    setLandingMode(true);
   });
 }
 

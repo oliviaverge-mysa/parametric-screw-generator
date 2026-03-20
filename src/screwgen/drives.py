@@ -200,46 +200,45 @@ _SLOT_ROTATION_DEG: dict[DriveType, float] = {
 
 def _drive_slot_width(p: DriveParams) -> float:
     """Compute slot width that matches the drive recess proportions."""
+    head_d = p.head_d if p.head_d is not None else 8.0
+    min_w = max(0.4, head_d * 0.10)
     if p.type == "phillips":
         nominal_slot_w = DRIVE_DIMS[("phillips", 4)]["slot_w"] + 2.0 * p.clearance
         nominal_slot_l = DRIVE_DIMS[("phillips", 4)]["slot_l"] + 2.0 * p.clearance
-        return nominal_slot_w * _opening_scale(p, nominal_slot_l)
+        return max(min_w, nominal_slot_w * _opening_scale(p, nominal_slot_l))
     if p.type == "square":
         nominal_af = DRIVE_DIMS[("square", 5)]["across_flats"] + 2.0 * p.clearance
         af = nominal_af * _opening_scale(p, nominal_af)
-        return af * 0.38
+        return max(min_w, af * 0.38)
     if p.type == "hex":
         nominal_af = DRIVE_DIMS[("hex", 3)]["across_flats"] + 2.0 * p.clearance
         af = nominal_af * _opening_scale(p, nominal_af)
-        return af * 0.35
+        return max(min_w, af * 0.35)
     if p.type == "torx":
         nominal_r_outer = DRIVE_DIMS[("torx", 6)]["r_outer"] + p.clearance
         scale = _opening_scale(p, 2.0 * nominal_r_outer)
         r_inner = (DRIVE_DIMS[("torx", 6)]["r_inner"] + p.clearance) * scale
-        return r_inner * 0.45
-    head_d = p.head_d if p.head_d is not None else 8.0
-    return max(0.4, head_d * 0.08)
+        return max(min_w, r_inner * 0.45)
+    return min_w
 
 
 def _make_slot_cut(p: DriveParams) -> cq.Workplane:
-    """Build a straight slot cut spanning the full head, oriented per drive type."""
+    """Build a straight slot cut spanning the full head diameter.
+
+    Slot depth is 75% of the drive depth so it doesn't dominate the head.
+    """
     head_d = p.head_d if p.head_d is not None else 8.0
-    slot_length = head_d
+    slot_length = head_d * 1.05
     slot_width = _drive_slot_width(p)
-    z_bottom, h_total = _z_span_total(p)
-    slot_profile = cq.Workplane("XY").rect(slot_length, slot_width)
-    prism = slot_profile.extrude(h_total).translate((0, 0, z_bottom))
-    r_edge = slot_length / 2.0 + CONFIG["cone_cover_margin"]
-    r_tip = CONFIG["cone_tip_radius"]
-    cone = (
+    slot_depth = p.depth * 0.75
+    z_bottom = p.topZ - slot_depth - p.eps
+    h_total = slot_depth + 2.0 * p.eps
+    slot = (
         cq.Workplane("XY")
-        .workplane(offset=z_bottom)
-        .circle(r_tip)
-        .workplane(offset=h_total)
-        .circle(r_edge)
-        .loft()
+        .rect(slot_length, slot_width)
+        .extrude(h_total)
+        .translate((0, 0, z_bottom))
     )
-    slot = prism.intersect(cone)
     rotation = _SLOT_ROTATION_DEG.get(p.type, 0.0)
     if rotation != 0.0:
         slot = slot.rotate((0, 0, 0), (0, 0, 1), rotation)

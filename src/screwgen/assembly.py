@@ -52,7 +52,7 @@ def _head_params_from_spec(h: HeadSpec) -> HeadParams:
 def _drive_params_from_spec(d: DriveSpec, head_params: HeadParams) -> DriveParams:
     head_d = float(head_params["d"])
     head_h = float(head_params["h"])
-    depth = d.depth if d.depth is not None else min(2.0, 0.45 * head_h)
+    depth = d.depth if d.depth is not None else min(3.0, 0.50 * head_h)
     return DriveParams(
         type=d.type,
         size=d.size,

@@ -504,7 +504,7 @@ def _parse_vision_json(content: str) -> tuple[str, str] | None:
         f"{fastener_type} {head_type} {drive_type}{slotted_tag} "
         f"head diameter {head_d:.2f} head height {head_h:.2f} "
         f"shank diameter {major_d:.2f} root diameter {root_d:.2f} "
-        f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
+        f"length {shaft_len:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
         f"thread length {thread_len:.2f} tip length {tip_len:.2f}"
     )
     head_label = head_type.title()
@@ -817,7 +817,7 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             f"{fastener_type} {head_type} {drive_type} "
             f"head diameter {head_d:.2f} head height {head_h:.2f} "
             f"shank diameter {major_d:.2f} root diameter {root_d:.2f} "
-            f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
+            f"length {shaft_len:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
             f"thread length {thread_len:.2f} tip length {tip_len:.2f}"
         )
         head_label = head_type.title()
@@ -1644,7 +1644,7 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             f"{fastener_type} {head_type} {drive_type}{slotted_tag} "
             f"head diameter {head_d:.2f} head height {head_h:.2f} "
             f"shank diameter {major_d:.2f} root diameter {root_d:.2f} "
-            f"length {length:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
+            f"length {shaft_len:.2f} pitch {pitch:.2f} thread height {thread_h:.2f} "
             f"thread length {thread_len:.2f} tip length {tip_len:.2f}"
         )
         head_label = head_type.title()
@@ -1959,26 +1959,26 @@ def _write_engineering_drawing_pdf(
         c.drawCentredString(ix + iw + zone_band * 0.5, y + row_h * 0.5 - 2, lab)
 
     # Header – part name as title, fixed near top edge.
-    header_y = iy + ih - 22
+    header_y = iy + ih - 20
     c.setFont("Helvetica-Bold", 13)
     c.drawString(ix + 16, header_y, screw_label[:70])
     c.setFont("Helvetica", 8.5)
-    c.drawString(ix + 16, header_y - 14, f"Head: {spec.head.type.title()} | Drive: {drive.title()} | Units: mm")
+    c.drawString(ix + 16, header_y - 15, f"Head: {spec.head.type.title()} | Drive: {drive.title()} | Units: mm")
 
     # Layout: views get the upper ~65% of the inner area; iso + title block below.
-    view_zone_top = iy + ih - 46
-    view_zone_bot = iy + ih * 0.35
+    view_zone_top = iy + ih - 52
+    view_zone_bot = iy + ih * 0.38
     view_zone_mid = (view_zone_top + view_zone_bot) * 0.5
 
-    side_x = ix + 56
+    side_x = ix + 64
     side_y = view_zone_mid
 
-    dim_gap_lr = 80
-    right_pad = 36
+    dim_gap_lr = 100
+    right_pad = 42
     total_extent_mm = max(head_h + length + head_d, 1e-6)
     view_zone_half_h = (view_zone_top - view_zone_bot) * 0.5
-    px_per_mm = min((iw - 56 - dim_gap_lr - right_pad) / total_extent_mm, 22.0)
-    px_per_mm = min(px_per_mm, (view_zone_half_h * 0.78) / max(0.5 * head_d, 1e-6))
+    px_per_mm = min((iw - 64 - dim_gap_lr - right_pad) / total_extent_mm, 22.0)
+    px_per_mm = min(px_per_mm, (view_zone_half_h * 0.72) / max(0.5 * head_d, 1e-6))
     px_per_mm = max(px_per_mm, 3.0)
 
     shank_r = 0.5 * shaft_d * px_per_mm
@@ -1995,9 +1995,9 @@ def _write_engineering_drawing_pdf(
     top_cx = x_tip_end + dim_gap_lr + top_r
     _space_right = ix + iw - right_pad - (top_cx + top_r)
     if _space_right > 20:
-        top_cx += _space_right * 0.40
+        top_cx += _space_right * 0.35
     top_cy = side_y
-    side_label_y = side_y + max(head_r, shank_r) + 20
+    side_label_y = side_y + max(head_r, shank_r) + 26
 
     # Side-view profile.
     if spec.head.type == "flat":
@@ -2084,8 +2084,8 @@ def _write_engineering_drawing_pdf(
     c.setLineWidth(1)
 
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(side_x, side_label_y, "SIDE VIEW")
-    c.drawString(top_cx - 24, top_cy + top_r + 16, "TOP VIEW")
+    c.drawString(side_x, side_label_y + 8, "SIDE VIEW")
+    c.drawString(top_cx - 24, top_cy + top_r + 22, "TOP VIEW")
 
     overall_len = head_h + length
 
@@ -2097,9 +2097,9 @@ def _write_engineering_drawing_pdf(
     c.setFont("Helvetica", dim_text_size)
 
     # --- BELOW view on page (lower y) – stacked outward from part ---
-    below_part = side_y - max(head_r, shank_r) - 8.0
+    below_part = side_y - max(head_r, shank_r) - 12.0
     dim_y_shaft = below_part - dim_gap * 0.0
-    dim_y_full  = below_part - dim_gap * 1.0
+    dim_y_full  = below_part - dim_gap * 1.2
 
     # Shaft length
     _dim_h(
@@ -2118,7 +2118,7 @@ def _write_engineering_drawing_pdf(
     )
 
     # --- ABOVE view on page (higher y) – thread length and head height ---
-    above_part = side_y + max(head_r, shank_r) + 8.0
+    above_part = side_y + max(head_r, shank_r) + 12.0
 
     # Thread length
     if threaded_len > 0:
@@ -2132,7 +2132,7 @@ def _write_engineering_drawing_pdf(
 
     # Head height (above the view, above the SIDE VIEW label)
     if head_px > 4:
-        head_dim_y = max(above_part + dim_gap * 1.2, side_label_y + 14)
+        head_dim_y = max(above_part + dim_gap * 1.2, side_label_y + 26)
         _dim_h(
             side_x, x_body0,
             head_dim_y, side_y + max(head_r, shank_r),
@@ -2152,9 +2152,9 @@ def _write_engineering_drawing_pdf(
         )
 
     # --- RIGHT of side view: vertical dims (staggered to avoid overlap) ---
-    right_base = x_tip_end + 16.0
-    dim_x_major = right_base + 14.0
-    dim_x_root  = dim_x_major + max(46.0, dim_gap * 2.4)
+    right_base = x_tip_end + 20.0
+    dim_x_major = right_base + 16.0
+    dim_x_root  = dim_x_major + max(52.0, dim_gap * 2.6)
 
     _dim_v(
         dim_x_major,
@@ -2175,7 +2175,7 @@ def _write_engineering_drawing_pdf(
 
     # --- TOP VIEW: head diameter ---
     _dim_v(
-        top_cx + top_r + max(18.0, dim_gap),
+        top_cx + top_r + max(22.0, dim_gap * 1.1),
         top_cy - top_r, top_cy + top_r,
         top_cx + top_r,
         f"\u00d8{head_d:.2f}",
@@ -2190,7 +2190,7 @@ def _write_engineering_drawing_pdf(
 
     # Spec text – bottom-left corner, below isometric.
     c.setFont("Helvetica", 8.0)
-    spec_y = iy + 14
+    spec_y = iy + 10
     spec_lines = [
         f"Major \u00d8: {shaft_d:.2f} mm   |   Root \u00d8: {root_d:.2f} mm   |   Head H: {head_h:.2f} mm",
         f"Pitch: {avg_pitch:.3f} mm   |   Threads: ~{int(round(total_threads))}" if avg_pitch else "Pitch: N/A",
@@ -2200,16 +2200,16 @@ def _write_engineering_drawing_pdf(
     for i, line in enumerate(spec_lines):
         c.drawString(ix + 16, spec_y + 20 - i * 13, line)
 
-    # Isometric view: lower-left zone, anchored low.
-    iso_zone_top = view_zone_bot - 14
-    iso_zone_bot = spec_y + 40
-    iso_x = ix + 12
-    iso_avail_w = tb_x - iso_x - 16
-    iso_target_w = min(iso_avail_w, iw * 0.52)
+    # Isometric view: lower-left zone, shifted right for better centering.
+    iso_zone_top = view_zone_bot - 18
+    iso_zone_bot = spec_y + 44
+    iso_x = ix + 60
+    iso_avail_w = tb_x - iso_x - 24
+    iso_target_w = min(iso_avail_w, iw * 0.45)
     iso_target_h = max(100.0, iso_zone_top - iso_zone_bot)
     iso_y = iso_zone_bot
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(iso_x + 4, iso_zone_top + 4, "ISOMETRIC VIEW")
+    c.drawString(iso_x - 44, iso_zone_top + 6, "ISOMETRIC VIEW")
     drew_iso = False
     if iso_svg_path is not None and iso_svg_path.exists():
         try:
@@ -2917,7 +2917,7 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
         iso_preview_path = _DOWNLOAD_DIR / f"{stem}_iso.svg"
         preview_model = (
             screw
-            .rotate((0, 0, 0), (1, 0, 0), 15)
+            .rotate((0, 0, 0), (1, 0, 0), 70)
             .rotate((0, 0, 0), (0, 1, 0), -90)
             .rotate((0, 0, 0), (0, 0, 1), -90)
         )

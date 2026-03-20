@@ -423,7 +423,7 @@ def _validate_realism(parsed: ParsedQuery, prompt: PromptFn | None) -> None:
             "head diameter",
         )
 
-    shaft_len_for_tip = max(parsed.length - parsed.head_h, 0.5 * parsed.length)
+    shaft_len_for_tip = parsed.length
     if parsed.fastener_type == "bolt":
         tip_low = 0.0
         tip_high = 0.12 * parsed.shank_d
@@ -440,7 +440,7 @@ def _validate_realism(parsed: ParsedQuery, prompt: PromptFn | None) -> None:
         if not (tip_low <= parsed.tip_len <= tip_high):
             suggested = max(tip_low, min(parsed.tip_len, tip_high))
             _apply_or_raise(
-                f"Tip length {parsed.tip_len:.2f} looks unusual for length {parsed.length:.2f}.",
+                f"Tip length {parsed.tip_len:.2f} looks unusual for shaft length {parsed.length:.2f}.",
                 suggested,
                 "tip length",
             )
@@ -548,7 +548,9 @@ def screw_spec_from_query(
 ) -> ScrewSpec:
     parsed = parse_query(text)
     text_l = text.lower()
-    thread_intent = ("thread" in text_l) or ("tpi" in text_l) or (parsed.pitch is not None)
+    thread_intent = (
+        ("thread" in text_l) or ("tpi" in text_l) or (parsed.pitch is not None)
+    ) and ("unthreaded" not in text_l)
     _infer_with_chart_ratios(parsed, prompt)
 
     if prompt is not None:
@@ -576,7 +578,7 @@ def screw_spec_from_query(
         if parsed.root_d is None:
             parsed.root_d = _ask_number(prompt, "root diameter (minor)")
         if parsed.length is None:
-            parsed.length = _ask_number(prompt, "overall length (head top to tip)")
+            parsed.length = _ask_number(prompt, "shaft length (bottom of head to tip)")
         if parsed.tip_len is None:
             _infer_with_chart_ratios(parsed, prompt=None)
             if parsed.tip_len is None:
@@ -631,9 +633,9 @@ def screw_spec_from_query(
         _validate_realism(parsed, prompt)
     _infer_thread_defaults(parsed, thread_intent=thread_intent, prompt=prompt)
 
-    shaft_length = float(parsed.length) - float(parsed.head_h)
+    shaft_length = float(parsed.length)
     if shaft_length <= 0:
-        raise ValueError("Overall length must be larger than head height.")
+        raise ValueError("Shaft length must be > 0.")
 
     thread_start = parsed.thread_start if parsed.thread_start is not None else 0.0
     max_threadable = shaft_length - float(parsed.tip_len)

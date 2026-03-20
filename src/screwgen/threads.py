@@ -142,10 +142,15 @@ def _taper_threads_into_tip(
     p: ThreadParams,
     thread_height: float,
 ) -> cq.Workplane:
-    """Add cone-following threads in the tip by cutting helical grooves from a solid cone."""
+    """Add tapered thread ridges that follow the tip cone.
+
+    Splits the tip into segments with scaled profiles so threads shrink
+    naturally toward the point.  All segments are merged into a single
+    solid first, then unioned once with the shaft for performance.
+    """
     major_d = p.major_d if p.major_d is not None else shaft_spec.d_minor + 2.0 * thread_height
-    major_r = major_d / 2.0
-    minor_r = max(shaft_spec.d_minor / 2.0 + p.clearance - 0.03, 0.01)
+    major_r_base = major_d / 2.0
+    minor_r_base = max(shaft_spec.d_minor / 2.0 + p.clearance - 0.02, 0.01)
     shoulder_z = shaft_spec.L - shaft_spec.tip_len
     tip_len = shaft_spec.tip_len
 
@@ -153,39 +158,75 @@ def _taper_threads_into_tip(
     cone_start = shoulder_z - overlap
     cone_len = tip_len + overlap
 
-    tip_cone = (
-        cq.Workplane("XY")
-        .workplane(offset=cone_start)
-        .circle(major_r + 0.005)
-        .workplane(offset=cone_len)
-        .circle(0.005)
-        .loft()
-    )
-
-    half_w = _tri_half_width(thread_height, p.included_angle_deg)
-    groove_profile = (
-        cq.Workplane("XY")
-        .workplane(offset=cone_start)
-        .polyline(
-            [
-                (major_r + 0.02, -half_w),
-                (minor_r, 0.0),
-                (major_r + 0.02, half_w),
-            ]
-        )
-        .close()
-    )
-
-    groove_twist = _twist_angle_deg(cone_len, p.pitch, p.handedness)
-    groove = groove_profile.twistExtrude(cone_len, groove_twist, combine=False)
-
-    phase = 360.0 * (cone_start - p.start_from_head) / p.pitch + 180.0
+    min_useful_r = 0.08
+    n_segments = max(3, min(6, int(math.ceil(cone_len / p.pitch))))
+    seg_len = cone_len / n_segments
+    base_phase = 360.0 * (cone_start - p.start_from_head) / p.pitch
     if p.handedness == "LH":
-        phase = -phase
-    groove = groove.rotate((0, 0, 0), (0, 0, 1), phase)
+        base_phase = -base_phase
 
-    threaded_tip = tip_cone.cut(groove)
-    return result.union(threaded_tip, clean=True)
+    all_tip_threads: cq.Workplane | None = None
+
+    for i in range(n_segments):
+        seg_start = cone_start + i * seg_len
+        seg_mid = seg_start + seg_len / 2.0
+        t = (seg_mid - cone_start) / cone_len
+        scale = max(0.0, 1.0 - t)
+        local_major_r = major_r_base * scale
+        local_minor_r = minor_r_base * scale
+        if local_major_r < min_useful_r or local_minor_r >= local_major_r - 0.01:
+            break
+
+        half_w = _tri_half_width(local_major_r - local_minor_r, p.included_angle_deg)
+        if half_w < 0.01:
+            break
+
+        ridge_profile = (
+            cq.Workplane("XY")
+            .workplane(offset=seg_start)
+            .polyline(
+                [
+                    (local_minor_r, -half_w),
+                    (local_major_r, 0.0),
+                    (local_minor_r, half_w),
+                ]
+            )
+            .close()
+        )
+
+        twist = _twist_angle_deg(seg_len, p.pitch, p.handedness)
+        seg_ridges = ridge_profile.twistExtrude(seg_len, twist, combine=False)
+
+        seg_phase = base_phase + 360.0 * (i * seg_len) / p.pitch
+        if p.handedness == "LH":
+            seg_phase = -seg_phase + 2 * base_phase
+        seg_ridges = seg_ridges.rotate((0, 0, 0), (0, 0, 1), seg_phase)
+
+        env_r_start = major_r_base * max(0.0, 1.0 - (seg_start - cone_start) / cone_len) + 0.01
+        env_r_end = major_r_base * max(0.0, 1.0 - (seg_start + seg_len - cone_start) / cone_len) + 0.01
+        envelope = (
+            cq.Workplane("XY")
+            .workplane(offset=seg_start)
+            .circle(env_r_start)
+            .workplane(offset=seg_len)
+            .circle(max(0.01, env_r_end))
+            .loft()
+        )
+
+        try:
+            clipped = seg_ridges.intersect(envelope)
+            if not clipped.val().isValid() or clipped.val().Volume() < 1e-6:
+                continue
+            if all_tip_threads is None:
+                all_tip_threads = clipped
+            else:
+                all_tip_threads = all_tip_threads.union(clipped, clean=False)
+        except Exception:
+            continue
+
+    if all_tip_threads is not None:
+        result = result.union(all_tip_threads, clean=True)
+    return result
 
 
 def apply_external_thread(core_shaft: cq.Workplane, shaft_spec: ShaftSpec, p: ThreadParams) -> cq.Workplane:
