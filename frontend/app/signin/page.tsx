@@ -9,17 +9,17 @@ function SignInForm() {
   const error = params.get("error");
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-950">
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 max-w-sm w-full text-center shadow-xl">
-        <h1 className="text-2xl font-bold text-white mb-2">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="bg-white border border-gray-200 rounded-2xl p-8 max-w-sm w-full text-center shadow-lg">
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">
           Parametric Screw Generator
         </h1>
-        <p className="text-gray-400 text-sm mb-6">
+        <p className="text-gray-500 text-sm mb-6">
           Sign in with your Mysa account to continue.
         </p>
 
         {error && (
-          <div className="bg-red-900/40 border border-red-700 text-red-300 text-sm rounded-lg p-3 mb-4">
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 mb-4">
             {error === "AccessDenied"
               ? "Sign-in is restricted to @getmysa.com accounts."
               : "Something went wrong. Please try again."}
@@ -28,7 +28,7 @@ function SignInForm() {
 
         <button
           onClick={() => signIn("google", { callbackUrl: "/" })}
-          className="w-full flex items-center justify-center gap-3 bg-white text-gray-900 font-medium rounded-lg px-4 py-3 hover:bg-gray-100 transition-colors cursor-pointer"
+          className="w-full flex items-center justify-center gap-3 bg-gray-900 text-white font-medium rounded-lg px-4 py-3 hover:bg-gray-800 transition-colors cursor-pointer"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24">
             <path
@@ -51,7 +51,7 @@ function SignInForm() {
           Sign in with Google
         </button>
 
-        <p className="text-gray-500 text-xs mt-4">
+        <p className="text-gray-400 text-xs mt-4">
           Restricted to @getmysa.com accounts
         </p>
       </div>
@@ -63,8 +63,8 @@ export default function SignInPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center bg-gray-950">
-          <div className="text-gray-400">Loading...</div>
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <div className="text-gray-500">Loading...</div>
         </div>
       }
     >

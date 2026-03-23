@@ -14,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-gray-950 text-gray-100 min-h-screen">
+      <body className="bg-white text-gray-900 min-h-screen">
         <SessionProvider>{children}</SessionProvider>
       </body>
     </html>
