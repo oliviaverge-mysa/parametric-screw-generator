@@ -1816,6 +1816,7 @@ def _write_engineering_drawing_pdf(
     length = float(spec.shaft.L)
     tip_len = float(spec.shaft.tip_len)
     drive = spec.drive.type if spec.drive is not None else "none"
+    is_slotted = spec.drive.slotted if spec.drive is not None else False
     shaft_d = None
     threaded_len = 0.0
     pitch_values: list[float] = []
@@ -2014,6 +2015,18 @@ def _write_engineering_drawing_pdf(
             y = side_y + frac * head_r
             c.line(side_x + 2, y, x_body0 - 2, y)
 
+    # Slot notch on side view of head (visible as a narrow cut at the top).
+    if is_slotted:
+        drive_depth = float(spec.drive.depth) if spec.drive and spec.drive.depth else head_h * 0.35
+        slot_depth_px = min(drive_depth, head_h * 0.50) * px_per_mm
+        slot_notch_x = side_x + head_px * 0.5 - 0.5
+        c.setLineWidth(0.8)
+        c.line(slot_notch_x, side_y - head_r, slot_notch_x, side_y - head_r + slot_depth_px)
+        c.line(slot_notch_x + 1, side_y - head_r, slot_notch_x + 1, side_y - head_r + slot_depth_px)
+        c.line(slot_notch_x, side_y + head_r, slot_notch_x, side_y + head_r - slot_depth_px)
+        c.line(slot_notch_x + 1, side_y + head_r, slot_notch_x + 1, side_y + head_r - slot_depth_px)
+        c.setLineWidth(1)
+
     c.rect(x_body0, side_y - root_r, body_px, 2 * root_r, stroke=1, fill=0)
     if spec.fastener_type == "bolt":
         # Bolt end: strictly flat (no tip / no chamfer).
@@ -2044,6 +2057,7 @@ def _write_engineering_drawing_pdf(
         c.setLineWidth(1)
 
     # Top view: same scale as side view for proportional accuracy.
+    c.setLineWidth(1.0)
     if spec.head.type == "hex":
         pts = []
         for k in range(6):
@@ -2055,21 +2069,41 @@ def _write_engineering_drawing_pdf(
             c.line(x1, y1, x2, y2)
     else:
         c.circle(top_cx, top_cy, top_r, stroke=1, fill=0)
-    # Centerlines: dashed so drive outline remains the dominant visible feature.
-    c.setDash([2, 2], 0)
-    c.setLineWidth(0.8)
-    c.line(top_cx - top_r * 1.1, top_cy, top_cx + top_r * 1.1, top_cy)
-    c.line(top_cx, top_cy - top_r * 1.1, top_cx, top_cy + top_r * 1.1)
+
+    # Centerlines: thin dashed cross extending slightly beyond the head.
+    c.setDash([3, 2], 0)
+    c.setLineWidth(0.4)
+    c.line(top_cx - top_r * 1.15, top_cy, top_cx + top_r * 1.15, top_cy)
+    c.line(top_cx, top_cy - top_r * 1.15, top_cx, top_cy + top_r * 1.15)
     c.setDash([], 0)
-    c.setLineWidth(1.2)
+
+    # Drive outline — drawn as proper closed shapes to match engineering standards.
+    c.setLineWidth(0.9)
+    _drive_w = max(2.5, top_r * 0.14)  # width of each arm / slot channel
     if drive == "phillips":
-        c.line(top_cx - top_r * 0.48, top_cy, top_cx + top_r * 0.48, top_cy)
-        c.line(top_cx, top_cy - top_r * 0.48, top_cx, top_cy + top_r * 0.48)
+        arm_len = top_r * 0.52
+        hw = _drive_w * 0.5
+        c.rect(top_cx - arm_len, top_cy - hw, 2 * arm_len, 2 * hw, stroke=1, fill=0)
+        c.rect(top_cx - hw, top_cy - arm_len, 2 * hw, 2 * arm_len, stroke=1, fill=0)
     elif drive == "torx":
-        c.circle(top_cx, top_cy, top_r * 0.28, stroke=1, fill=0)
-        c.circle(top_cx, top_cy, top_r * 0.17, stroke=1, fill=0)
+        outer_r = top_r * 0.34
+        inner_r = top_r * 0.20
+        c.circle(top_cx, top_cy, outer_r, stroke=1, fill=0)
+        lobe_pts: list[tuple[float, float]] = []
+        for k in range(6):
+            a = k * math.pi / 3.0
+            lobe_pts.append((top_cx + outer_r * math.cos(a), top_cy + outer_r * math.sin(a)))
+        for k in range(6):
+            a = (k + 0.5) * math.pi / 3.0
+            lobe_pts.append((top_cx + inner_r * math.cos(a), top_cy + inner_r * math.sin(a)))
+        for k in range(6):
+            x1, y1 = lobe_pts[k]
+            x2, y2 = lobe_pts[6 + k]
+            x3, y3 = lobe_pts[(k + 1) % 6]
+            c.line(x1, y1, x2, y2)
+            c.line(x2, y2, x3, y3)
     elif drive == "hex":
-        r = top_r * 0.30
+        r = top_r * 0.34
         pts = []
         for k in range(6):
             a = 0.523599 + k * 1.047198
@@ -2079,8 +2113,14 @@ def _write_engineering_drawing_pdf(
             x2, y2 = pts[(i + 1) % 6]
             c.line(x1, y1, x2, y2)
     elif drive == "square":
-        s = top_r * 0.62
+        s = top_r * 0.52
         c.rect(top_cx - s / 2.0, top_cy - s / 2.0, s, s, stroke=1, fill=0)
+
+    # Slot — drawn as a filled rectangle spanning the head.
+    if is_slotted:
+        slot_half = top_r * 0.94
+        slot_hw = max(1.2, _drive_w * 0.45)
+        c.rect(top_cx - slot_half, top_cy - slot_hw, 2 * slot_half, 2 * slot_hw, stroke=1, fill=0)
     c.setLineWidth(1)
 
     c.setFont("Helvetica-Bold", 9)
