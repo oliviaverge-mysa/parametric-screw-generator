@@ -29,6 +29,8 @@ except ImportError:
                 if _k and _k not in os.environ:
                     os.environ[_k] = _v
 
+import hmac as _hmac
+
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -95,15 +97,23 @@ class _ApiKeyMiddleware(BaseHTTPMiddleware):
         if not _BACKEND_API_KEY:
             return await call_next(request)
         path = request.url.path
+        if path == "/health":
+            return await call_next(request)
         if path.startswith("/api/") or path.startswith("/downloads/"):
             auth = request.headers.get("authorization", "")
-            if auth != f"Bearer {_BACKEND_API_KEY}":
+            expected = f"Bearer {_BACKEND_API_KEY}"
+            if not _hmac.compare_digest(auth.encode(), expected.encode()):
                 return JSONResponse({"detail": "Unauthorized"}, status_code=401)
         return await call_next(request)
 
 
 app.add_middleware(_ApiKeyMiddleware)
 app.mount("/assets", StaticFiles(directory=_WEB_DIR), name="assets")
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 _chat_counter = itertools.count(1)
 _chats: dict[int, ChatState] = {}

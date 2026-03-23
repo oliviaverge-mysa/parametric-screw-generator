@@ -4,6 +4,8 @@ import { useSession, signOut } from "next-auth/react";
 import Script from "next/script";
 import { useRef, useEffect } from "react";
 
+const ASSET_VERSION = "20260323";
+
 export default function Home() {
   const { data: session } = useSession();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -14,7 +16,7 @@ export default function Home() {
     injected.current = true;
     const link = document.createElement("link");
     link.rel = "stylesheet";
-    link.href = `/assets/styles.css?v=${Date.now()}`;
+    link.href = `/assets/styles.css?v=${ASSET_VERSION}`;
     document.head.appendChild(link);
   }, []);
 
@@ -80,22 +82,24 @@ export default function Home() {
           </div>
           <div className="global-header-right" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             {session?.user && (
-              <span style={{ fontSize: "12px", color: "#888" }}>{session.user.email}</span>
+              <>
+                <span style={{ fontSize: "12px", opacity: 0.6 }}>{session.user.email}</span>
+                <button
+                  onClick={() => signOut()}
+                  style={{
+                    fontSize: "12px",
+                    color: "#888",
+                    background: "none",
+                    border: "1px solid #444",
+                    borderRadius: "6px",
+                    padding: "4px 10px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Sign out
+                </button>
+              </>
             )}
-            <button
-              onClick={() => signOut()}
-              style={{
-                fontSize: "12px",
-                color: "#888",
-                background: "none",
-                border: "1px solid #444",
-                borderRadius: "6px",
-                padding: "4px 10px",
-                cursor: "pointer",
-              }}
-            >
-              Sign out
-            </button>
             <button id="theme-toggle-btn" className="theme-toggle" type="button" aria-label="Toggle dark mode">
               <span className="theme-toggle-thumb" aria-hidden="true" />
             </button>
@@ -258,7 +262,7 @@ export default function Home() {
         </div>
       </div>
 
-      <Script src={`/assets/app.js?v=${Date.now()}`} strategy="afterInteractive" />
+      <Script src={`/assets/app.js?v=${ASSET_VERSION}`} strategy="afterInteractive" />
     </>
   );
 }

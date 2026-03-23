@@ -12,10 +12,19 @@ export async function proxyToBackend(
     headers.set("Authorization", `Bearer ${BACKEND_API_KEY}`);
   }
 
-  const res = await fetch(url, {
-    ...init,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers,
+    });
+  } catch (err) {
+    console.error(`[proxy] Backend unreachable: ${url}`, err);
+    return new Response(
+      JSON.stringify({ detail: "Backend service unavailable" }),
+      { status: 502, headers: { "content-type": "application/json" } }
+    );
+  }
 
   const responseHeaders = new Headers();
   const passthroughHeaders = [

@@ -1,6 +1,10 @@
 import { proxyToBackend } from "@/lib/backend";
 import { NextRequest } from "next/server";
 
+export const config = {
+  api: { bodyParser: false },
+};
+
 function buildBackendPath(params: { path: string[] }, search: string) {
   const joined = `/api/chats/${params.path.join("/")}`;
   return search ? `${joined}${search}` : joined;
