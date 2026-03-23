@@ -29,10 +29,11 @@ except ImportError:
                 if _k and _k not in os.environ:
                     os.environ[_k] = _v
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .search_parser import screw_spec_from_query
 from .spec import ScrewSpec, ShaftSpec, ThreadRegionSpec
@@ -83,6 +84,25 @@ _DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _BRAND_BG = _WEB_DIR / "brand-bg.png"
 
 app = FastAPI(title="Fastener Generator Chat")
+
+_BACKEND_API_KEY = os.getenv("BACKEND_API_KEY", "")
+
+
+class _ApiKeyMiddleware(BaseHTTPMiddleware):
+    """Protect /api/* and /downloads/* when BACKEND_API_KEY is set."""
+
+    async def dispatch(self, request: Request, call_next):
+        if not _BACKEND_API_KEY:
+            return await call_next(request)
+        path = request.url.path
+        if path.startswith("/api/") or path.startswith("/downloads/"):
+            auth = request.headers.get("authorization", "")
+            if auth != f"Bearer {_BACKEND_API_KEY}":
+                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        return await call_next(request)
+
+
+app.add_middleware(_ApiKeyMiddleware)
 app.mount("/assets", StaticFiles(directory=_WEB_DIR), name="assets")
 
 _chat_counter = itertools.count(1)

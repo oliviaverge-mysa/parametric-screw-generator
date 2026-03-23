@@ -33,6 +33,10 @@ _test_imgs/
 *.key
 !.env.example
 
+# Frontend (Next.js)
+frontend/.next/
+frontend/node_modules/
+
 # OS / editor
 .DS_Store
 Thumbs.db
