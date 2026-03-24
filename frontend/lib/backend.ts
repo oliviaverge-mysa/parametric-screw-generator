@@ -3,13 +3,17 @@ const BACKEND_API_KEY = process.env.BACKEND_API_KEY || "";
 
 export async function proxyToBackend(
   path: string,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  opts?: { authorName?: string }
 ): Promise<Response> {
   const url = `${BACKEND_URL}${path}`;
   const headers = new Headers(init.headers);
 
   if (BACKEND_API_KEY) {
     headers.set("Authorization", `Bearer ${BACKEND_API_KEY}`);
+  }
+  if (opts?.authorName) {
+    headers.set("X-Author-Name", opts.authorName);
   }
 
   let res: Response;

@@ -2,7 +2,6 @@ const chatListEl = document.getElementById("chat-list");
 const messagesEl = document.getElementById("messages");
 const formEl = document.getElementById("composer");
 const inputEl = document.getElementById("message-input");
-const imageUploadBtn = document.getElementById("image-upload-btn");
 const imageInputEl = document.getElementById("image-input");
 const newChatBtn = document.getElementById("new-chat-btn");
 const deleteChatBtn = document.getElementById("delete-chat-btn");
@@ -18,13 +17,13 @@ const chatPanelEl = document.getElementById("chat-panel");
 const libraryViewEl = document.getElementById("library-view");
 const libraryGridEl = document.getElementById("library-grid");
 const sidebarRecentGridEl = document.getElementById("sidebar-recent-grid");
-const composerSendBtn = formEl.querySelector("button[type='submit']");
+const composerSendBtn = formEl ? formEl.querySelector("button[type='submit']") : null;
 const landingEl = document.getElementById("landing");
 const landingFormEl = document.getElementById("landing-form");
 const landingInputEl = document.getElementById("landing-input");
 const landingSendBtn = document.getElementById("landing-send-btn");
 const landingBuilderBtn = document.getElementById("landing-builder-btn");
-const landingChatbotBtn = document.getElementById("landing-chatbot-btn");
+const landingUploadBtn = document.getElementById("landing-upload-btn");
 const landingImageInputEl = document.getElementById("landing-image-input");
 const builderViewEl = document.getElementById("builder-view");
 const builderFormEl = document.getElementById("builder-form");
@@ -42,8 +41,17 @@ const sidebarChatsHeader = document.querySelector(".chats-header-row");
 const sidebarRecentSection = document.querySelector(".recent-fasteners");
 const viewNavEl = document.getElementById("view-nav");
 const navBuilderBtn = document.getElementById("nav-builder-btn");
-const navChatBtn = document.getElementById("nav-chat-btn");
+const navUploadBtn = document.getElementById("nav-upload-btn");
 const brandHomeBtn = document.getElementById("brand-home-btn");
+const uploadViewEl = document.getElementById("upload-view");
+const uploadEmptyState = document.getElementById("upload-empty-state");
+const uploadProcessing = document.getElementById("upload-processing");
+const uploadPreviewEl = document.getElementById("upload-preview");
+const uploadPreviewCards = document.getElementById("upload-preview-cards");
+const uploadDropzone = document.getElementById("upload-dropzone");
+const uploadBrowseBtn = document.getElementById("upload-browse-btn");
+const uploadFileInput = document.getElementById("upload-file-input");
+const uploadAnotherBtn = document.getElementById("upload-another-btn");
 
 let currentChatId = null;
 let pendingQuestion = null;
@@ -194,12 +202,13 @@ function queueLibraryRefresh(delayMs = 120) {
 }
 
 function setActiveView(nextView) {
-  const valid = ["chat", "library", "builder"];
-  activeView = valid.includes(nextView) ? nextView : "chat";
-  if (chatPanelEl) chatPanelEl.hidden = activeView !== "chat";
+  const valid = ["upload", "library", "builder"];
+  activeView = valid.includes(nextView) ? nextView : "upload";
+  if (chatPanelEl) chatPanelEl.hidden = true;
+  if (uploadViewEl) uploadViewEl.hidden = activeView !== "upload";
   if (libraryViewEl) libraryViewEl.hidden = activeView !== "library";
   if (builderViewEl) builderViewEl.hidden = activeView !== "builder";
-  if (activeView !== "chat" && contextMenuEl) {
+  if (contextMenuEl) {
     contextMenuEl.hidden = true;
     contextChatId = null;
   }
@@ -207,17 +216,14 @@ function setActiveView(nextView) {
     libraryContextMenuEl.hidden = true;
     contextLibraryItemKey = null;
   }
-  setSidebarMode(activeView === "builder" ? "builder" : "chat");
+  setSidebarMode(activeView === "builder" ? "builder" : "upload");
   if (navBuilderBtn) navBuilderBtn.classList.toggle("active", activeView === "builder");
-  if (navChatBtn) navChatBtn.classList.toggle("active", activeView === "chat" || activeView === "library");
+  if (navUploadBtn) navUploadBtn.classList.toggle("active", activeView === "upload" || activeView === "library");
 }
 
 function setSidebarMode(mode) {
   const isBuild = mode === "builder";
   if (sidebarBuilderForm) sidebarBuilderForm.hidden = !isBuild;
-  const chatListEl2 = document.getElementById("chat-list");
-  if (chatListEl2) chatListEl2.hidden = isBuild;
-  if (sidebarChatsHeader) sidebarChatsHeader.hidden = isBuild;
   if (sidebarRecentSection) sidebarRecentSection.hidden = false;
 }
 
@@ -623,7 +629,7 @@ async function startFromLanding(rawValue) {
   setLandingMode(false);
   setActiveView("chat");
   // Recover from any stale disabled state so landing submit can proceed.
-  if (composerSendBtn.disabled) setWorking(false);
+  if (composerSendBtn && composerSendBtn.disabled) setWorking(false);
   // Landing always starts a fresh chat, never reuses the currently open one.
   await createChat();
   inputEl.value = content;
@@ -631,7 +637,7 @@ async function startFromLanding(rawValue) {
 }
 
 async function sendMessage(rawValue) {
-  if (composerSendBtn.disabled) return;
+  if (composerSendBtn && composerSendBtn.disabled) return;
   if (!currentChatId) {
     await createChat();
   }
@@ -671,7 +677,7 @@ async function sendMessage(rawValue) {
 
 async function sendImageMessage(file) {
   if (!file) return;
-  if (composerSendBtn.disabled) return;
+  if (composerSendBtn && composerSendBtn.disabled) return;
   if (!currentChatId) {
     await createChat();
   }
@@ -1096,9 +1102,10 @@ function renderMessages(chat) {
 }
 
 function setWorking(isWorking) {
-  composerSendBtn.disabled = isWorking;
-  if (imageUploadBtn) imageUploadBtn.disabled = isWorking;
-  composerSendBtn.textContent = isWorking ? "Working..." : "Send";
+  if (composerSendBtn) {
+    composerSendBtn.disabled = isWorking;
+    composerSendBtn.textContent = isWorking ? "Working..." : "Send";
+  }
 }
 
 function toggleSidebar() {
@@ -1151,17 +1158,6 @@ formEl.addEventListener("submit", async (e) => {
   await sendMessage(inputEl.value);
 });
 
-if (imageUploadBtn && imageInputEl) {
-  imageUploadBtn.addEventListener("click", () => {
-    if (composerSendBtn.disabled) return;
-    imageInputEl.click();
-  });
-  imageInputEl.addEventListener("change", async () => {
-    const file = imageInputEl.files && imageInputEl.files[0];
-    if (!file) return;
-    await sendImageMessage(file);
-  });
-}
 
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
@@ -1651,13 +1647,239 @@ function initBuilderEvents() {
   }
 }
 
+function resetUploadView() {
+  if (uploadEmptyState) uploadEmptyState.hidden = false;
+  if (uploadProcessing) uploadProcessing.hidden = true;
+  if (uploadPreviewEl) uploadPreviewEl.hidden = true;
+  if (uploadPreviewCards) uploadPreviewCards.innerHTML = "";
+  if (uploadFileInput) uploadFileInput.value = "";
+}
+
+async function handleUploadPhoto(file) {
+  if (!file) return;
+  if (uploadEmptyState) uploadEmptyState.hidden = true;
+  if (uploadProcessing) uploadProcessing.hidden = false;
+  if (uploadPreviewEl) uploadPreviewEl.hidden = true;
+
+  try {
+    const chatRes = await fetch("/api/chats", { method: "POST" });
+    if (!chatRes.ok) throw new Error("Could not create session");
+    const chat = await chatRes.json();
+    const chatId = chat.id;
+
+    const body = new FormData();
+    body.append("file", file);
+    body.append("content", file.name || "Uploaded reference image");
+    const imgRes = await fetch(`/api/chats/${chatId}/image`, {
+      method: "POST",
+      body,
+    });
+    if (!imgRes.ok) {
+      const err = await imgRes.json().catch(() => ({ detail: "Upload failed" }));
+      throw new Error(err.detail || "Could not process image");
+    }
+    const imgData = await imgRes.json();
+    const activeChatId = imgData.chat_id || chatId;
+
+    const maxRounds = 12;
+    let done = false;
+    for (let i = 0; i < maxRounds && !done; i++) {
+      const detail = await (await fetch(`/api/chats/${activeChatId}`)).json();
+      const hasResult = detail.messages.some(m => m.kind === "result" && m.stl_url);
+      if (hasResult && !detail.pending_question) {
+        showUploadPreview(detail);
+        done = true;
+        break;
+      }
+      if (!detail.pending_question) {
+        if (hasResult) {
+          showUploadPreview(detail);
+        } else {
+          const lastBot = [...detail.messages].reverse().find(m => m.role === "bot");
+          alert(lastBot ? lastBot.content : "Could not generate fastener from image.");
+          resetUploadView();
+        }
+        done = true;
+        break;
+      }
+      const answer = autoAnswerUploadPending(detail.pending_question);
+      if (!answer) {
+        if (hasResult) showUploadPreview(detail);
+        else resetUploadView();
+        done = true;
+        break;
+      }
+      const followRes = await fetch(`/api/chats/${activeChatId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: answer }),
+      });
+      if (!followRes.ok) break;
+    }
+
+    if (!done) {
+      const detail = await (await fetch(`/api/chats/${activeChatId}`)).json();
+      const hasResult = detail.messages.some(m => m.kind === "result" && m.stl_url);
+      if (hasResult) showUploadPreview(detail);
+      else { resetUploadView(); alert("Generation timed out. Please try again."); }
+    }
+
+    queueLibraryRefresh(200);
+  } catch (err) {
+    alert(err.message || "Upload failed. Please try again.");
+    resetUploadView();
+  }
+}
+
+function autoAnswerUploadPending(question) {
+  if (!question) return null;
+  const q = question.toLowerCase();
+  if (/\[y\/n\]/i.test(q) || /does this look right/i.test(q) || /keep your value/i.test(q)) return "y";
+  if (/screw\s+or\s+(a\s+)?bolt/i.test(q)) return "screw";
+  if (/press enter/i.test(q) || /assuming/i.test(q)) return "ok";
+  if (/use max threadable/i.test(q)) return "y";
+  if (/matching nut/i.test(q)) return "n";
+  if (/style.*matching nut|hex.*square/i.test(q) || /nut.*shape/i.test(q)) return "hex";
+  if (/slotted or non/i.test(q)) return "non-slotted";
+  return "y";
+}
+
+function showUploadPreview(chatDetail) {
+  const resultMsgs = chatDetail.messages.filter(m => m.kind === "result" && m.stl_url);
+  if (resultMsgs.length === 0) {
+    const lastBot = [...chatDetail.messages].reverse().find(m => m.role === "bot");
+    alert(lastBot ? lastBot.content : "Generation completed but no model was produced.");
+    resetUploadView();
+    return;
+  }
+  if (uploadProcessing) uploadProcessing.hidden = true;
+  if (uploadEmptyState) uploadEmptyState.hidden = true;
+  if (uploadPreviewEl) uploadPreviewEl.hidden = false;
+  if (!uploadPreviewCards) return;
+  uploadPreviewCards.innerHTML = "";
+
+  for (const resultMsg of resultMsgs) {
+    const item = {
+      chat_id: chatDetail.id,
+      chat_title: chatDetail.title || "Fastener",
+      name: deriveItemName(chatDetail, resultMsg),
+      step_url: resultMsg.step_url || "",
+      stl_url: resultMsg.stl_url || "",
+      preview_url: resultMsg.preview_url || "",
+      drawing_url: resultMsg.drawing_url || "",
+      bundle_url: resultMsg.bundle_url || "",
+    };
+    const cached = cacheUpsert(item);
+    persistLibraryNames();
+
+    const card = document.createElement("div");
+    card.className = "builder-preview-card";
+
+    const headerEl = document.createElement("div");
+    headerEl.className = "preview-card-header";
+    headerEl.textContent = itemName(cached);
+
+    const canvasEl = document.createElement("div");
+    canvasEl.className = "preview-canvas builder-preview-canvas";
+
+    const actionsEl = document.createElement("div");
+    actionsEl.className = "result-actions";
+
+    const drawingBtn = document.createElement("a");
+    drawingBtn.className = "download-btn" + (resultMsg.drawing_url ? "" : " disabled");
+    drawingBtn.textContent = resultMsg.drawing_url ? "Drawing" : "Drawing N/A";
+    drawingBtn.href = resultMsg.drawing_url || "#";
+    drawingBtn.download = "";
+
+    const stepBtn = document.createElement("a");
+    stepBtn.className = "download-btn disabled";
+    stepBtn.textContent = "STEP";
+    stepBtn.href = resultMsg.step_url || "#";
+    stepBtn.download = "";
+
+    const stlBtn = document.createElement("a");
+    stlBtn.className = "download-btn disabled";
+    stlBtn.textContent = "STL";
+    stlBtn.href = resultMsg.stl_url || "#";
+    stlBtn.download = "";
+
+    const bundleBtn = document.createElement("a");
+    bundleBtn.className = "download-btn disabled";
+    bundleBtn.textContent = resultMsg.bundle_url ? "ZIP" : "ZIP N/A";
+    bundleBtn.href = resultMsg.bundle_url || "#";
+    bundleBtn.download = "";
+
+    actionsEl.appendChild(drawingBtn);
+    actionsEl.appendChild(stepBtn);
+    actionsEl.appendChild(stlBtn);
+    actionsEl.appendChild(bundleBtn);
+
+    card.appendChild(headerEl);
+    card.appendChild(canvasEl);
+    card.appendChild(actionsEl);
+    uploadPreviewCards.appendChild(card);
+
+    if (resultMsg.preview_url) {
+      initPreviewImage(canvasEl, resultMsg.preview_url, {
+        onReady: () => {
+          stepBtn.classList.remove("disabled");
+          stlBtn.classList.remove("disabled");
+          if (resultMsg.bundle_url) bundleBtn.classList.remove("disabled");
+        },
+        onError: () => {
+          stepBtn.classList.remove("disabled");
+          stlBtn.classList.remove("disabled");
+          if (resultMsg.bundle_url) bundleBtn.classList.remove("disabled");
+        },
+      });
+    } else {
+      stepBtn.classList.remove("disabled");
+      stlBtn.classList.remove("disabled");
+      if (resultMsg.bundle_url) bundleBtn.classList.remove("disabled");
+    }
+  }
+}
+
+function initUploadEvents() {
+  if (uploadBrowseBtn && uploadFileInput) {
+    uploadBrowseBtn.addEventListener("click", () => uploadFileInput.click());
+    uploadFileInput.addEventListener("change", () => {
+      const file = uploadFileInput.files && uploadFileInput.files[0];
+      if (file) handleUploadPhoto(file);
+    });
+  }
+  if (uploadDropzone) {
+    uploadDropzone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      uploadDropzone.classList.add("drag-over");
+    });
+    uploadDropzone.addEventListener("dragleave", () => {
+      uploadDropzone.classList.remove("drag-over");
+    });
+    uploadDropzone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      uploadDropzone.classList.remove("drag-over");
+      const file = e.dataTransfer && e.dataTransfer.files[0];
+      if (file && file.type.startsWith("image/")) handleUploadPhoto(file);
+    });
+    uploadDropzone.addEventListener("click", (e) => {
+      if (e.target === uploadBrowseBtn) return;
+      if (uploadFileInput) uploadFileInput.click();
+    });
+  }
+  if (uploadAnotherBtn) {
+    uploadAnotherBtn.addEventListener("click", resetUploadView);
+  }
+}
+
 async function boot() {
   applyTheme(detectInitialTheme());
   setWorking(false);
   if (landingSendBtn) landingSendBtn.disabled = false;
-  setActiveView("chat");
+  setActiveView("upload");
   setLandingMode(true);
   initBuilderEvents();
+  initUploadEvents();
   await loadChats();
 }
 
@@ -1671,10 +1893,11 @@ if (landingBuilderBtn) {
   });
 }
 
-if (landingChatbotBtn) {
-  landingChatbotBtn.addEventListener("click", () => {
+if (landingUploadBtn) {
+  landingUploadBtn.addEventListener("click", () => {
     setLandingMode(false);
-    setActiveView("chat");
+    setActiveView("upload");
+    resetUploadView();
   });
 }
 
@@ -1704,9 +1927,9 @@ if (navBuilderBtn) {
   });
 }
 
-if (navChatBtn) {
-  navChatBtn.addEventListener("click", () => {
-    setActiveView("chat");
+if (navUploadBtn) {
+  navUploadBtn.addEventListener("click", () => {
+    setActiveView("upload");
   });
 }
 

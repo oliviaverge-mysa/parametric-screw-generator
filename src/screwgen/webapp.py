@@ -60,6 +60,7 @@ class ChatState:
     latest_spec: ScrewSpec | None = None
     image_estimate_query: str | None = None
     image_caption: str = ""
+    author_name: str = ""
 
 
 class MessageIn(BaseModel):
@@ -523,12 +524,7 @@ def _parse_vision_json(content: str) -> tuple[str, str] | None:
     elif thread_frac > 0.05:
         thread_len = min(thread_frac * shaft_len, max_threadable)
     else:
-        if length <= 25:
-            thread_len = min(0.85 * shaft_len, max_threadable)
-        elif length <= 50:
-            thread_len = min(0.65 * shaft_len, max_threadable)
-        else:
-            thread_len = min(0.55 * shaft_len, max_threadable)
+        thread_len = max_threadable
     slotted_tag = " slotted" if is_slotted and drive_type != "no drive" else ""
     query = (
         f"{fastener_type} {head_type} {drive_type}{slotted_tag} "
@@ -842,7 +838,7 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             std_thread = min(2.0 * major_d + 6.0, 0.45 * length)
             thread_len = min(std_thread, max_threadable)
         else:
-            thread_len = min(max(0.55 * length, min(0.85 * length, max_threadable)), max_threadable)
+            thread_len = max_threadable
         query = (
             f"{fastener_type} {head_type} {drive_type} "
             f"head diameter {head_d:.2f} head height {head_h:.2f} "
@@ -1661,8 +1657,7 @@ def _estimate_query_from_image(image_path: Path) -> tuple[str, str]:
             std_thread = min(2.0 * major_d + 6.0, 0.45 * length)
             thread_len = min(std_thread, max_threadable)
         else:
-            thread_len = _clamp(length * 0.74, 0.55 * length, max_threadable)
-            thread_len = min(thread_len, max_threadable)
+            thread_len = max_threadable
 
         if max_line_len > 0 and head_width_px > 0:
             slot_ratio = max_line_len / head_width_px
@@ -1934,6 +1929,7 @@ def _write_engineering_drawing_pdf(
         label_dy: float = -2,
         label_mode: str = "center",
         label_x: float | None = None,
+        label_above: bool = False,
     ) -> None:
         c.setStrokeColorRGB(*_DIM_COLOR)
         c.setLineWidth(0.6)
@@ -1952,8 +1948,13 @@ def _write_engineering_drawing_pdf(
         c.setStrokeColorRGB(0, 0, 0)
         c.setLineWidth(1)
         c.setFont(_DIM_FONT, _DIM_SIZE)
-        lx = label_x if label_x is not None else (x + label_dx)
-        ly = (y1 + y2) * 0.5 + label_dy
+        if label_above:
+            tw = c.stringWidth(label, _DIM_FONT, _DIM_SIZE)
+            lx = x - tw / 2
+            ly = y2 + 6
+        else:
+            lx = label_x if label_x is not None else (x + label_dx)
+            ly = (y1 + y2) * 0.5 + label_dy
         c.drawString(lx, ly, label)
 
     # Drafting frame with zone labels.
@@ -2023,39 +2024,47 @@ def _write_engineering_drawing_pdf(
     x_tip_end = x_tip0 + tip_px
 
     top_r = head_r
-    top_cx = x_tip_end + dim_gap_lr + top_r
-    _space_right = ix + iw - right_pad - (top_cx + top_r)
-    if _space_right > 20:
-        top_cx += _space_right * 0.35
+    root_label_right = x_tip_end + 8.0 + 38.0 + 60.0
+    top_cx_min = max(x_tip_end + dim_gap_lr + top_r, root_label_right + top_r + 12.0)
+    top_cx = top_cx_min
+    max_top_cx = ix + iw - right_pad - top_r - 20
+    _space_right = max_top_cx - top_cx
+    if _space_right > 10:
+        top_cx += _space_right * 0.80
+    if top_cx > max_top_cx:
+        top_cx = max_top_cx
     top_cy = side_y
-    side_label_y = side_y + max(head_r, shank_r) + 26
+    side_label_y = side_y + max(head_r, shank_r) + 30
 
     # Side-view profile.
     if spec.head.type == "flat":
-        # Flat head is countersunk: draw a trapezoid/conical profile.
         c.line(side_x, side_y - head_r, x_body0, side_y - root_r)
         c.line(x_body0, side_y - root_r, x_body0, side_y + root_r)
         c.line(x_body0, side_y + root_r, side_x, side_y + head_r)
         c.line(side_x, side_y + head_r, side_x, side_y - head_r)
+    elif spec.head.type in ("pan", "button"):
+        import math as _math
+        c.rect(side_x, side_y - head_r, head_px, 2 * head_r, stroke=1, fill=0)
+        # Dome arc on the left edge of the head (the face).
+        dome_steps = 32
+        dome_bulge = head_px * 0.18
+        p_arc = c.beginPath()
+        p_arc.moveTo(side_x, side_y - head_r)
+        for i in range(1, dome_steps):
+            t = i / dome_steps
+            y_t = side_y - head_r + t * 2 * head_r
+            x_t = side_x - dome_bulge * _math.sin(t * _math.pi)
+            p_arc.lineTo(x_t, y_t)
+        p_arc.lineTo(side_x, side_y + head_r)
+        c.drawPath(p_arc, stroke=1, fill=0)
     else:
         c.rect(side_x, side_y - head_r, head_px, 2 * head_r, stroke=1, fill=0)
     if spec.head.type == "hex":
-        # Hex side view style requested: rectangular head with three horizontal lines.
         for frac in (-0.45, 0.0, 0.45):
             y = side_y + frac * head_r
             c.line(side_x + 2, y, x_body0 - 2, y)
 
-    # Slot notch on side view of head (visible as a narrow cut at the top).
-    if is_slotted:
-        drive_depth = float(spec.drive.depth) if spec.drive and spec.drive.depth else head_h * 0.35
-        slot_depth_px = min(drive_depth, head_h * 0.50) * px_per_mm
-        slot_notch_x = side_x + head_px * 0.5 - 0.5
-        c.setLineWidth(0.8)
-        c.line(slot_notch_x, side_y - head_r, slot_notch_x, side_y - head_r + slot_depth_px)
-        c.line(slot_notch_x + 1, side_y - head_r, slot_notch_x + 1, side_y - head_r + slot_depth_px)
-        c.line(slot_notch_x, side_y + head_r, slot_notch_x, side_y + head_r - slot_depth_px)
-        c.line(slot_notch_x + 1, side_y + head_r, slot_notch_x + 1, side_y + head_r - slot_depth_px)
-        c.setLineWidth(1)
+    
 
     c.rect(x_body0, side_y - root_r, body_px, 2 * root_r, stroke=1, fill=0)
     if spec.fastener_type == "bolt":
@@ -2143,8 +2152,11 @@ def _write_engineering_drawing_pdf(
             x2, y2 = pts[(i + 1) % 6]
             c.line(x1, y1, x2, y2)
     elif drive == "square":
-        s = top_r * 0.52
-        c.rect(top_cx - s / 2.0, top_cy - s / 2.0, s, s, stroke=1, fill=0)
+        d = top_r * 0.38
+        c.line(top_cx, top_cy - d, top_cx + d, top_cy)
+        c.line(top_cx + d, top_cy, top_cx, top_cy + d)
+        c.line(top_cx, top_cy + d, top_cx - d, top_cy)
+        c.line(top_cx - d, top_cy, top_cx, top_cy - d)
 
     # Slot — drawn as a filled rectangle spanning the head.
     if is_slotted:
@@ -2154,7 +2166,7 @@ def _write_engineering_drawing_pdf(
     c.setLineWidth(1)
 
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(side_x, side_label_y + 8, "SIDE VIEW")
+    c.drawString(side_x, side_label_y + 4, "SIDE VIEW")
     c.drawString(top_cx - 24, top_cy + top_r + 22, "TOP VIEW")
 
     overall_len = head_h + length
@@ -2166,20 +2178,42 @@ def _write_engineering_drawing_pdf(
     dim_text_size = 7.5
     c.setFont("Helvetica", dim_text_size)
 
-    # --- BELOW view on page (lower y) – stacked outward from part ---
-    below_part = side_y - max(head_r, shank_r) - 12.0
-    dim_y_shaft = below_part - dim_gap * 0.0
-    dim_y_full  = below_part - dim_gap * 1.2
+    # --- ABOVE view on page (higher y) – thread length only ---
+    above_part = side_y + max(head_r, shank_r) + 22.0
 
-    # Shaft length
+    # Thread length (close to the body)
+    if threaded_len > 0:
+        thread_end_x = x_body0 + threaded_len * px_per_mm
+        _dim_h(
+            x_body0, thread_end_x,
+            above_part, side_y + max(head_r, shank_r),
+            f"Thread {threaded_len:.2f}",
+            label_dy=4.0,
+        )
+
+    # --- BELOW view on page (lower y) – head height, shaft, overall ---
+    below_part = side_y - max(head_r, shank_r) - 12.0
+    dim_y_head_shaft = below_part - dim_gap * 0.0
+    dim_y_full = below_part - dim_gap * 1.3
+
+    # Head height (below, same row as shaft length)
+    if head_px > 4:
+        _dim_h(
+            side_x, x_body0,
+            dim_y_head_shaft, side_y - max(head_r, shank_r),
+            f"{head_h:.2f}",
+            label_dy=4.0,
+        )
+
+    # Shaft length (same row as head height)
     _dim_h(
         x_body0, x_tip_end,
-        dim_y_shaft, side_y - max(head_r, shank_r),
+        dim_y_head_shaft, side_y - max(head_r, shank_r),
         f"{length:.2f}",
         label_dy=4.0,
     )
 
-    # Full (overall) length
+    # Full (overall) length — one row further down
     _dim_h(
         side_x, x_tip_end,
         dim_y_full, side_y - max(head_r, shank_r),
@@ -2187,51 +2221,27 @@ def _write_engineering_drawing_pdf(
         label_dy=4.0,
     )
 
-    # --- ABOVE view on page (higher y) – thread length and head height ---
-    above_part = side_y + max(head_r, shank_r) + 12.0
-
-    # Thread length
-    if threaded_len > 0:
-        thread_end_x = x_body0 + threaded_len * px_per_mm
-        _dim_h(
-            x_body0, thread_end_x,
-            above_part + dim_gap * 0.0, side_y + max(head_r, shank_r),
-            f"Thread {threaded_len:.2f}",
-            label_dy=4.0,
-        )
-
-    # Head height (above the view, above the SIDE VIEW label)
-    if head_px > 4:
-        head_dim_y = max(above_part + dim_gap * 1.2, side_label_y + 26)
-        _dim_h(
-            side_x, x_body0,
-            head_dim_y, side_y + max(head_r, shank_r),
-            f"{head_h:.2f}",
-            label_dy=4.0,
-        )
-
     # Tip length (screws only, shown as a small break-out dim near the tip)
     if spec.fastener_type != "bolt" and tip_px > 4:
         _dim_h(
             x_tip0, x_tip_end,
-            below_part + dim_gap * 0.0, side_y + root_r,
+            dim_y_head_shaft, side_y + root_r,
             f"{tip_len:.2f}",
             label_dy=4.0,
             label_align="left",
             label_x=x_tip_end + 6.0,
         )
 
-    # --- RIGHT of side view: vertical dims (staggered to avoid overlap) ---
-    right_base = x_tip_end + 20.0
-    dim_x_major = right_base + 16.0
-    dim_x_root  = dim_x_major + max(52.0, dim_gap * 2.6)
+    # --- RIGHT of side view: vertical dims (close to screw body) ---
+    dim_x_major = x_tip_end + 8.0
+    dim_x_root  = dim_x_major + max(28.0, dim_gap * 1.5)
 
     _dim_v(
         dim_x_major,
         side_y - shank_r, side_y + shank_r,
         x_tip_end,
         f"\u00d8{shaft_d:.2f}",
-        label_dx=6, label_dy=5,
+        label_above=True,
     )
 
     if abs(shaft_d - root_d) > 0.05:
@@ -2240,12 +2250,16 @@ def _write_engineering_drawing_pdf(
             side_y - root_r, side_y + root_r,
             x_tip_end,
             f"\u00d8{root_d:.2f} root",
-            label_dx=6, label_dy=-12,
+            label_above=True,
         )
 
     # --- TOP VIEW: head diameter ---
+    head_dim_x = top_cx + top_r + max(36.0, dim_gap * 1.8)
+    max_dim_x = ix + iw - right_pad - 10
+    if head_dim_x > max_dim_x:
+        head_dim_x = max_dim_x
     _dim_v(
-        top_cx + top_r + max(22.0, dim_gap * 1.1),
+        head_dim_x,
         top_cy - top_r, top_cy + top_r,
         top_cx + top_r,
         f"\u00d8{head_d:.2f}",
@@ -2297,8 +2311,8 @@ def _write_engineering_drawing_pdf(
                 cx = iso_x + (iso_target_w - rendered_w) * 0.5
                 cy = iso_y + (iso_target_h - rendered_h) * 0.5
                 c.saveState()
-                c.translate(cx, cy)
-                c.scale(scale, scale)
+                c.translate(cx, cy + rendered_h)
+                c.scale(scale, -scale)
                 c.translate(-x1, -y1)
                 renderPDF.draw(drawing, c, 0, 0)
                 c.restoreState()
@@ -2354,7 +2368,7 @@ def _write_engineering_drawing_pdf(
 
     # Row 1 (three cells): drawn by / approved by / date
     _cell(tb_x, top_row_top, "DRAWN BY", author[:20])
-    _cell(col1, top_row_top, "APPROVED BY", "Mysa")
+    _cell(col1, top_row_top, "APPROVED BY", "")
     _cell(col2, top_row_top, "DATE", datetime.now().strftime("%Y-%m-%d"))
     # Row 2 (three cells): units / head-drive / scale
     _cell(tb_x, bot_row_top, "UNITS", "mm")
@@ -2371,6 +2385,7 @@ def _write_nut_drawing_pdf(
     pitch: float,
     nut_h: float,
     output_path: Path,
+    author_name: str = "",
 ) -> None:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.pdfgen import canvas
@@ -2530,8 +2545,9 @@ def _write_nut_drawing_pdf(
         c.setFont("Helvetica", 8.0)
         c.drawString(col_left + pad, row_top - value_drop, value)
 
-    _cell(tb_x, top_row_top, "DRAWN BY", os.getenv("DRAWING_AUTHOR", "User")[:20])
-    _cell(col1, top_row_top, "APPROVED BY", "Mysa")
+    _nut_author = (author_name or os.getenv("DRAWING_AUTHOR", "") or "User").strip() or "User"
+    _cell(tb_x, top_row_top, "DRAWN BY", _nut_author[:20])
+    _cell(col1, top_row_top, "APPROVED BY", "")
     _cell(col2, top_row_top, "DATE", datetime.now().strftime("%Y-%m-%d"))
     _cell(tb_x, bot_row_top, "UNITS", "mm")
     _cell(col1, bot_row_top, "TYPE", style_name)
@@ -2866,6 +2882,7 @@ def _build_nut_from_params(
             pitch=pitch,
             nut_h=nut_h,
             output_path=drawing_path,
+            author_name=chat.author_name or os.getenv("DRAWING_AUTHOR", "User"),
         )
         drawing_url = f"/downloads/{drawing_path.name}"
     except Exception:
@@ -2987,12 +3004,12 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
         iso_preview_path = _DOWNLOAD_DIR / f"{stem}_iso.svg"
         preview_model = (
             screw
-            .rotate((0, 0, 0), (1, 0, 0), 70)
+            .rotate((0, 0, 0), (1, 0, 0), -70)
             .rotate((0, 0, 0), (0, 1, 0), -90)
             .rotate((0, 0, 0), (0, 0, 1), -90)
         )
-        catalog_dir = (0.10, 0.30, 1.0)
-        iso_dir = (0.10, 0.30, 1.0)
+        catalog_dir = (0.10, -0.30, 1.0)
+        iso_dir = (0.10, -0.30, 1.0)
         exporters.export(
             preview_model,
             str(preview_path),
@@ -3016,7 +3033,7 @@ def _build_from_spec(chat: ChatState, spec: ScrewSpec) -> dict[str, Any]:
             spec,
             drawing_pdf_path,
             screw_name=chat.title,
-            author_name=os.getenv("DRAWING_AUTHOR", "User"),
+            author_name=chat.author_name or os.getenv("DRAWING_AUTHOR", "User"),
             iso_svg_path=iso_preview_path if iso_preview_path and iso_preview_path.exists() else None,
         )
         drawing_export_path = drawing_pdf_path
@@ -3266,10 +3283,13 @@ def edit_message(chat_id: int, msg_idx: int, body: EditMessageIn) -> dict[str, A
 
 
 @app.post("/api/chats/{chat_id}/messages")
-def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
+def post_message(chat_id: int, body: MessageIn, request: Request) -> dict[str, Any]:
     chat = _chats.get(chat_id)
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat not found.")
+    author_header = request.headers.get("x-author-name", "")
+    if author_header and not chat.author_name:
+        chat.author_name = author_header
 
     raw = body.content
     content = raw.strip()
@@ -3461,10 +3481,13 @@ def post_message(chat_id: int, body: MessageIn) -> dict[str, Any]:
 
 
 @app.post("/api/chats/{chat_id}/image")
-async def post_image(chat_id: int, file: UploadFile = File(...), content: str = Form("")) -> dict[str, Any]:
+async def post_image(chat_id: int, request: Request, file: UploadFile = File(...), content: str = Form("")) -> dict[str, Any]:
     chat = _chats.get(chat_id)
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat not found.")
+    author_header = request.headers.get("x-author-name", "")
+    if author_header and not chat.author_name:
+        chat.author_name = author_header
     ctype = (file.content_type or "").lower()
     if not ctype.startswith("image/"):
         raise HTTPException(status_code=400, detail="Only image uploads are supported.")

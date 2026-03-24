@@ -24,10 +24,10 @@
           <span class="landing-choice-label">Build Your Own</span>
           <span class="landing-choice-desc">Step-by-step spec builder</span>
         </button>
-        <button id="landing-chatbot-btn" class="landing-choice-btn" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.2L4 17.2V4h16v12z" fill="currentColor"/></svg>
-          <span class="landing-choice-label">Chatbot</span>
-          <span class="landing-choice-desc">Describe or upload a photo</span>
+        <button id="landing-upload-btn" class="landing-choice-btn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3.5h6l1.3 2H20a2 2 0 0 1 2 2v10.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2h3.7l1.3-2Zm3 4.2a4.2 4.2 0 1 0 0 8.4 4.2 4.2 0 0 0 0-8.4Zm0 1.7a2.5 2.5 0 1 1 0 5.0 2.5 2.5 0 0 1 0-5.0Z" fill="currentColor"/></svg>
+          <span class="landing-choice-label">Upload Photo</span>
+          <span class="landing-choice-desc">Generate from a reference image</span>
         </button>
       </div>
       <form id="landing-form" class="landing-search" hidden>
@@ -65,13 +65,13 @@
     <aside class="sidebar">
       <nav id="view-nav" class="view-nav">
         <button id="nav-builder-btn" class="view-nav-btn active" type="button">Builder</button>
-        <button id="nav-chat-btn" class="view-nav-btn" type="button">Chat</button>
+        <button id="nav-upload-btn" class="view-nav-btn" type="button">Upload Photo</button>
       </nav>
       <section class="recent-fasteners">
         <div class="recent-header">Recent Fasteners</div>
         <div id="sidebar-recent-grid" class="sidebar-recent-grid"></div>
       </section>
-      <div class="chats-header-row">
+      <div class="chats-header-row" hidden>
         <div class="recent-header chats-label">Chats</div>
         <div class="chats-actions">
           <button id="new-chat-btn" class="icon-action-btn" type="button" aria-label="New chat" title="New chat"></button>
@@ -82,7 +82,7 @@
           </button>
         </div>
       </div>
-      <div id="chat-list" class="chat-list"></div>
+      <div id="chat-list" class="chat-list" hidden></div>
       <div id="sidebar-builder-form" class="sidebar-builder-form" hidden>
         <div id="builder-form" class="builder-form">
           <div class="builder-section" data-section="type">
@@ -167,18 +167,32 @@
     </aside>
 
     <main class="main">
-      <section id="chat-panel" class="chat-panel">
+      <section id="chat-panel" class="chat-panel" hidden>
         <div id="messages" class="messages"></div>
         <form id="composer" class="composer">
-          <input id="message-input" type="text" placeholder="Describe the fastener you want..." autocomplete="off" />
-          <button id="image-upload-btn" class="icon-action-btn composer-image-btn" type="button" aria-label="Upload image" title="Upload image">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M9 3.5h6l1.3 2H20a2 2 0 0 1 2 2v10.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2h3.7l1.3-2Zm3 4.2a4.2 4.2 0 1 0 0 8.4 4.2 4.2 0 0 0 0-8.4Zm0 1.7a2.5 2.5 0 1 1 0 5.0 2.5 2.5 0 0 1 0-5.0Zm-6.7.1a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z" fill="currentColor"/>
-            </svg>
-          </button>
+          <input id="message-input" type="text" placeholder="" autocomplete="off" />
           <input id="image-input" type="file" accept="image/*" hidden />
-          <button type="submit">Send</button>
+          <button type="submit" hidden>Send</button>
         </form>
+      </section>
+      <section id="upload-view" class="upload-view" hidden>
+        <div id="upload-empty-state" class="upload-empty-state">
+          <div id="upload-dropzone" class="upload-dropzone">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3.5h6l1.3 2H20a2 2 0 0 1 2 2v10.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2h3.7l1.3-2Zm3 4.2a4.2 4.2 0 1 0 0 8.4 4.2 4.2 0 0 0 0-8.4Zm0 1.7a2.5 2.5 0 1 1 0 5.0 2.5 2.5 0 0 1 0-5.0Z" fill="currentColor"/></svg>
+            <h3>Upload a Photo</h3>
+            <p>Drag &amp; drop an image of a fastener, or click to browse</p>
+            <button type="button" id="upload-browse-btn" class="upload-browse-btn">Choose File</button>
+            <input id="upload-file-input" type="file" accept="image/*" hidden />
+          </div>
+        </div>
+        <div id="upload-processing" class="upload-processing" hidden>
+          <div class="upload-spinner"></div>
+          <p>Analyzing image and generating fastener...</p>
+        </div>
+        <div id="upload-preview" class="builder-preview" hidden>
+          <div id="upload-preview-cards" class="builder-preview-cards"></div>
+          <button type="button" id="upload-another-btn" class="builder-another-btn">Upload Another</button>
+        </div>
       </section>
       <section id="builder-view" class="builder-view" hidden>
         <div id="builder-empty-state" class="builder-empty-state">
