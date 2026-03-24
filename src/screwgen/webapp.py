@@ -2181,11 +2181,16 @@ def _write_engineering_drawing_pdf(
     # --- ABOVE view on page (higher y) – thread length only ---
     above_part = side_y + max(head_r, shank_r) + 22.0
 
-    # Thread length (close to the body)
+    # Thread length (positioned at actual thread region location)
     if threaded_len > 0:
-        thread_end_x = x_body0 + threaded_len * px_per_mm
+        thread_starts = [s for k, s, e, p in region_ranges if k == "thread"]
+        thread_ends = [e for k, s, e, p in region_ranges if k == "thread"]
+        thread_first_mm = min(thread_starts) if thread_starts else 0.0
+        thread_last_mm = max(thread_ends) if thread_ends else threaded_len
+        thread_start_x = x_body0 + thread_first_mm * px_per_mm
+        thread_end_x = x_body0 + min(thread_last_mm, length - tip_len) * px_per_mm
         _dim_h(
-            x_body0, thread_end_x,
+            thread_start_x, thread_end_x,
             above_part, side_y + max(head_r, shank_r),
             f"Thread {threaded_len:.2f}",
             label_dy=4.0,
