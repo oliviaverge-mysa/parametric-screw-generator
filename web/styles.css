@@ -1650,7 +1650,6 @@ body[data-theme="dark"] .result-actions {
 .preview-img-colorized {
   width: 98%;
   height: 98%;
-  transform: scaleY(-1);
 }
 
 .library-media img {
@@ -1658,13 +1657,11 @@ body[data-theme="dark"] .result-actions {
   max-height: 95%;
   width: auto;
   height: auto;
-  transform: scaleY(-1);
 }
 
 .recent-thumb img {
   width: 98%;
   height: 98%;
-  transform: scaleY(-1);
 }
 
 /* Keep all preview subjects centered and scaled consistently */

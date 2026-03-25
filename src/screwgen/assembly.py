@@ -149,11 +149,7 @@ def make_screw_from_spec(spec: ScrewSpec, include_thread_markers: bool = True) -
     for region in expand_regions(spec):
         if isinstance(region, ThreadRegionSpec):
             effective_length = region.length
-            if (
-                spec.fastener_type == "screw"
-                and spec.shaft.tip_len > 0
-                and thread_start + region.length >= shoulder_z - 0.5
-            ):
+            if spec.fastener_type == "screw" and spec.shaft.tip_len > 0:
                 effective_length = spec.shaft.L - thread_start
             shaft_up = apply_external_thread(
                 shaft_up,
