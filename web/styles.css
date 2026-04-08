@@ -1652,6 +1652,11 @@ body[data-theme="dark"] .result-actions {
   height: 98%;
 }
 
+.preview-canvas:not(.nut-preview) img {
+  transform: rotate(180deg);
+  transform-origin: center center;
+}
+
 .library-media img {
   max-width: 95%;
   max-height: 95%;

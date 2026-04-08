@@ -2080,6 +2080,14 @@ def _write_engineering_drawing_pdf(
     c.line(x_body0, side_y + shank_r, x_tip0, side_y + shank_r)
     c.setDash([], 0)
 
+    # Centerline axis through shaft (chain dash: long-short-long).
+    c.saveState()
+    c.setDash([8, 3, 2, 3], 0)
+    c.setLineWidth(0.3)
+    c.setStrokeColorRGB(0.35, 0.35, 0.35)
+    c.line(side_x - 6, side_y, x_tip_end + 6, side_y)
+    c.restoreState()
+
     # Thread rendering by region span (cleaner and lighter).
     for kind, start_mm, end_mm, p in region_ranges:
         if kind != "thread":
@@ -2196,6 +2204,39 @@ def _write_engineering_drawing_pdf(
             label_dy=4.0,
         )
 
+        # ISO thread designation with leader, below the thread-length label.
+        if avg_pitch and shaft_d:
+            _major_int = int(round(shaft_d))
+            if abs(shaft_d - _major_int) < 0.15:
+                _iso_major = f"M{_major_int}"
+            else:
+                _iso_major = f"M{shaft_d:.1f}"
+            _iso_str = f"{_iso_major}\u00d7{avg_pitch:.2g}"
+            _thread_mid_x = (thread_start_x + thread_end_x) * 0.5
+            _iso_y = above_part - 16.0
+            c.saveState()
+            c.setFont("Helvetica-Bold", 7.0)
+            _iso_tw = c.stringWidth(_iso_str, "Helvetica-Bold", 7.0)
+            _thread_span = abs(thread_end_x - thread_start_x)
+            if _thread_span > _iso_tw + 6:
+                _iso_text_x = _thread_mid_x
+                _iso_centered = True
+            else:
+                _iso_text_x = max(thread_start_x, thread_end_x) + 8 + _iso_tw * 0.5
+                _iso_centered = True
+            _shelf_half = _iso_tw * 0.5 + 4
+            _dot_x = _thread_mid_x
+            _dot_y = side_y + shank_r
+            c.setStrokeColorRGB(0.15, 0.15, 0.15)
+            c.setFillColorRGB(0.15, 0.15, 0.15)
+            c.setLineWidth(0.5)
+            c.circle(_dot_x, _dot_y, 1.2, fill=1, stroke=0)
+            c.line(_dot_x, _dot_y, _iso_text_x, _iso_y - 1.5)
+            c.line(_iso_text_x - _shelf_half, _iso_y - 1.5,
+                   _iso_text_x + _shelf_half, _iso_y - 1.5)
+            c.drawCentredString(_iso_text_x, _iso_y, _iso_str)
+            c.restoreState()
+
     # --- BELOW view on page (lower y) – head height, shaft, overall ---
     below_part = side_y - max(head_r, shank_r) - 12.0
     dim_y_head_shaft = below_part - dim_gap * 0.0
@@ -2272,7 +2313,7 @@ def _write_engineering_drawing_pdf(
     )
 
     # Precompute title block box so isometric can be placed to its left.
-    tb_w = 285
+    tb_w = 330
     tb_h = 108
     tb_x = ix + iw - tb_w - 8
     tb_y = iy + 6
@@ -2353,10 +2394,52 @@ def _write_engineering_drawing_pdf(
 
     c.setFont("Helvetica-Bold", 10)
     c.drawString(tb_x + 8, tb_y + tb_h - 14, "MYSA")
+
+    # Third-angle projection symbol (ISO 128): truncated cone profile + concentric circles.
+    _sym_cx = tb_x + tb_w - 32
+    _sym_cy = y_hdr + 10
+    _sym_r_outer = 5.0
+    _sym_r_inner = 2.2
+    _trap_w = 10.0
+    _trap_h_top = 2 * _sym_r_inner
+    _trap_h_bot = 2 * _sym_r_outer
+    _trap_x = _sym_cx - _sym_r_outer - _trap_w - 4
+    c.saveState()
+    c.setLineWidth(0.5)
+    c.setStrokeColorRGB(0.25, 0.25, 0.25)
+    c.circle(_sym_cx, _sym_cy, _sym_r_outer, stroke=1, fill=0)
+    c.circle(_sym_cx, _sym_cy, _sym_r_inner, stroke=1, fill=0)
+    _trap_pts = c.beginPath()
+    _trap_pts.moveTo(_trap_x, _sym_cy - _trap_h_bot / 2)
+    _trap_pts.lineTo(_trap_x + _trap_w, _sym_cy - _trap_h_top / 2)
+    _trap_pts.lineTo(_trap_x + _trap_w, _sym_cy + _trap_h_top / 2)
+    _trap_pts.lineTo(_trap_x, _sym_cy + _trap_h_bot / 2)
+    _trap_pts.close()
+    c.drawPath(_trap_pts, stroke=1, fill=0)
+    c.setDash([1.5, 1.5], 0)
+    c.setLineWidth(0.3)
+    c.line(_trap_x - 3, _sym_cy, _sym_cx + _sym_r_outer + 3, _sym_cy)
+    c.line(_sym_cx, _sym_cy - _sym_r_outer - 3, _sym_cx, _sym_cy + _sym_r_outer + 3)
+    c.setDash([], 0)
+    c.restoreState()
+
+    # Part-name row: left portion for name, right portion for material.
+    _mat_col = tb_x + tb_w * 0.72
+    c.line(_mat_col, y_part, _mat_col, y_hdr)
     c.setFont("Helvetica", 8.2)
     c.drawString(tb_x + 8, y_part + 8, "PART NAME")
     c.setFont("Helvetica", 7.8)
-    c.drawString(tb_x + 66, y_part + 8, screw_label[:42])
+    _name_max_w = _mat_col - (tb_x + 66) - 6
+    _name_text = screw_label
+    while c.stringWidth(_name_text, "Helvetica", 7.8) > _name_max_w and len(_name_text) > 10:
+        _name_text = _name_text[:-1]
+    if _name_text != screw_label:
+        _name_text = _name_text.rstrip() + "\u2026"
+    c.drawString(tb_x + 66, y_part + 8, _name_text)
+    c.setFont("Helvetica", 7.6)
+    c.drawString(_mat_col + 6, y_part + 13, "MATERIAL")
+    c.setFont("Helvetica", 8.0)
+    c.drawString(_mat_col + 6, y_part + 4, "\u2014")
 
     pad = 8
     row_h = (y_part - tb_y) / 2
