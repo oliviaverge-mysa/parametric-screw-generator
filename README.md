@@ -1,3 +1,12 @@
+---
+title: Fastener Generator
+emoji: 🔩
+colorFrom: blue
+colorTo: gray
+sdk: docker
+app_port: 8000
+---
+
 # Fastener Generator
 
 Parametric CAD fastener generator with a chat-based web UI. Describe what you need in plain English (or upload a photo), and the app generates production-ready CAD files.
@@ -110,7 +119,23 @@ Generated files are written to `out/web/` with descriptive filenames:
 
 ## Deployment
 
-### Docker on an internal server (recommended)
+### Hugging Face Spaces (free, no credit card)
+
+The repo is pre-configured for HF Spaces Docker deployment:
+
+1. Create a new Space at [huggingface.co/new-space](https://huggingface.co/new-space) — choose **Docker** as the SDK
+2. Clone your new Space repo locally and copy this project's files into it (or push directly):
+   ```bash
+   git clone https://huggingface.co/spaces/YOUR_USER/fastener-generator
+   cd fastener-generator
+   cp -r /path/to/parametric-screw-generator/* .
+   git add . && git commit -m "Initial deploy" && git push
+   ```
+3. HF Spaces builds the Docker image automatically. Your app will be live at `https://YOUR_USER-fastener-generator.hf.space`
+
+To enable photo-based detection, add API keys as **Secrets** in the Space settings (e.g. `GROQ_API_KEY`, `GEMINI_API_KEY`).
+
+### Docker on an internal server
 
 The easiest way to make this available to your team:
 
@@ -124,9 +149,9 @@ docker compose up -d --build
 
 Everyone on the network can then access it at `http://server-ip:8000`.
 
-### Cloud VM
+### Railway (free trial)
 
-If you don't have an internal server, spin up a free-tier VM (AWS EC2 `t2.micro`, GCP `e2-micro`, or Azure `B1s`), install Docker, and follow the steps above. CadQuery is too memory-heavy for free serverless platforms like Heroku or Render.
+The repo includes a `railway.json`. Sign in at [railway.app](https://railway.app) with GitHub, deploy from your repo, and get a public URL in minutes. Free trial credits cover light usage.
 
 ## Limitations
 
