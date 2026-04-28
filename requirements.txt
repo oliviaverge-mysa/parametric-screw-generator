@@ -1,8 +1,9 @@
-cadquery>=2.6
-fastapi
-uvicorn
-python-multipart
-reportlab
-svglib
-Pillow
-opencv-python-headless
+cadquery==2.7.0
+cadquery-ocp==7.8.1.1.post1
+fastapi==0.135.3
+uvicorn==0.44.0
+python-multipart==0.0.24
+reportlab==4.4.10
+svglib==1.6.0
+Pillow==12.2.0
+opencv-python-headless==4.13.0.92
