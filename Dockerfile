@@ -21,6 +21,8 @@ COPY --chown=user src/ src/
 COPY --chown=user web/ web/
 COPY --chown=user run_web.py .
 
+RUN python -c "import base64,pathlib; f=pathlib.Path('web/brand-bg.b64'); p=pathlib.Path('web/brand-bg.png'); b=f.read_text().split(',',1)[1] if ',' in f.read_text() else f.read_text(); p.write_bytes(base64.b64decode(b))" 2>/dev/null || true
+
 RUN mkdir -p $HOME/app/out
 
 ENV HOST=0.0.0.0

@@ -46,8 +46,8 @@ body.landing-active #library-view {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 70%, #1a1a2e 100%);
-  filter: brightness(1.04);
+  background: url("/brand-bg?v=20260220-3") center center / cover no-repeat;
+  filter: contrast(1.03) saturate(1.18) brightness(1.04);
   transform: scale(1.01);
   z-index: 0;
   pointer-events: none;
@@ -584,7 +584,7 @@ body[data-theme="dark"] .chat-context-menu .toolbar-btn:hover {
     linear-gradient(180deg, #ffffffc9 0%, #f8f9ffdb 100%),
     radial-gradient(380px 220px at 0% 0%, #ff0b3e1f 0%, transparent 68%),
     radial-gradient(400px 220px at 100% 0%, #0a4cff22 0%, transparent 68%),
-    linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 70%, #1a1a2e 100%);
+    url("/brand-bg?v=20260220-3") center center / cover no-repeat;
   backdrop-filter: blur(3px);
 }
 
@@ -1116,7 +1116,7 @@ body[data-theme="dark"] .app {
   border-right: 1px solid var(--ui-line);
   background:
     linear-gradient(180deg, var(--ui-elevated) 0%, var(--ui-surface) 100%),
-    linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 70%, #1a1a2e 100%);
+    url("/brand-bg?v=20260220-3") center center / cover no-repeat;
 }
 
 .brand-wordmark {
@@ -1806,7 +1806,7 @@ body[data-theme="dark"] .library-delete-icon:hover {
     linear-gradient(180deg, #ffffff88 0%, #ffffff72 100%),
     radial-gradient(420px 280px at 0% 0%, #ff0b3e28 0%, transparent 72%),
     radial-gradient(460px 300px at 100% 0%, #0a4cff26 0%, transparent 74%),
-    linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 70%, #1a1a2e 100%);
+    url("/brand-bg?v=20260220-3") center center / cover no-repeat;
 }
 
 body[data-theme="dark"] .sidebar {
@@ -1814,7 +1814,7 @@ body[data-theme="dark"] .sidebar {
     linear-gradient(180deg, #111a2cbf 0%, #111a2cad 100%),
     radial-gradient(420px 280px at 0% 0%, #ff0b3e29 0%, transparent 74%),
     radial-gradient(460px 300px at 100% 0%, #0a4cff30 0%, transparent 76%),
-    linear-gradient(135deg, #1a1a2e 0%, #16213e 40%, #0f3460 70%, #1a1a2e 100%);
+    url("/brand-bg?v=20260220-3") center center / cover no-repeat;
 }
 
 /* Keep sidebar image stable; scroll content instead of stretching panel */
