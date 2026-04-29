@@ -1,13 +1,13 @@
-FROM cadquery/cadquery:latest
-
-USER root
+FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglib2.0-0 libsm6 libxrender1 libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements-pip.txt /tmp/requirements-pip.txt
-RUN pip install --no-cache-dir -r /tmp/requirements-pip.txt && rm /tmp/requirements-pip.txt
+RUN pip install --no-cache-dir --upgrade pip
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 RUN useradd -m -u 1000 user
 USER user
