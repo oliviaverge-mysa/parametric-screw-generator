@@ -1,10 +1,10 @@
-FROM continuumio/miniconda3:latest
+FROM cadquery/cadquery:latest
+
+USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 libglib2.0-0 libsm6 libxrender1 libxext6 \
     && rm -rf /var/lib/apt/lists/*
-
-RUN conda install -y -c conda-forge cadquery=2.4 && conda clean -afy
 
 COPY requirements-pip.txt /tmp/requirements-pip.txt
 RUN pip install --no-cache-dir -r /tmp/requirements-pip.txt && rm /tmp/requirements-pip.txt
