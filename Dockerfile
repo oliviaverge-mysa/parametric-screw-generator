@@ -23,8 +23,8 @@ COPY --chown=user run_web.py .
 RUN mkdir -p $HOME/app/out
 
 ENV HOST=0.0.0.0
-ENV PORT=8000
+ENV PORT=7860
 
-EXPOSE 8000
+EXPOSE 7860
 
 CMD ["python", "run_web.py"]
